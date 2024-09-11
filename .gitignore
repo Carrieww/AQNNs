@@ -1,0 +1,9 @@
+**/.DS_Store
+/data
+/results
+/results_CNNH
+/results_NNH
+/venv
+/visualisation
+*__pycache__*
+*.idea/
