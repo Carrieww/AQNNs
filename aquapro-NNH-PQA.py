@@ -180,15 +180,20 @@ def exp_PQA_maximal_CR(
     factor=0.9,
 ):
     rt_k_success = defaultdict(list)
-    rt_k_precis = defaultdict(list)
+    rt_k_precision = defaultdict(list)
+    rt_k_recall = defaultdict(list)
     rt_k_acc = defaultdict(list)
     rt_k_rejH0 = defaultdict(list)
     rt_response_time = defaultdict(list)
+    rt_prop = defaultdict(list)
     pt_k_success = defaultdict(list)
     pt_k_recall = defaultdict(list)
+    pt_k_precision = defaultdict(list)
     pt_k_acc = defaultdict(list)
     pt_response_time = defaultdict(list)
     pt_k_rejH0 = defaultdict(list)
+    pt_prop = defaultdict(list)
+
     scale_list = np.array([0])
     oracle_ori = oracle
 
@@ -215,8 +220,8 @@ def exp_PQA_maximal_CR(
         proxy_dist_S = proxy_dist[indices]
         S_size = sync_oracle_S.shape[0]
 
-        true_ans = np.where(sync_oracle_S <= t)[0]
-        print(f"prop_S at {sample_ind}-th sample is: ", true_ans.shape[0] / S_size)
+        true_ans_S = np.where(sync_oracle_S <= t)[0]
+        print(f"prop_S at {sample_ind}-th sample is: ", true_ans_S.shape[0] / S_size)
         time_one_sample = time.time() - one_sample_start
 
         # PQA-PT-sync
@@ -228,10 +233,10 @@ def exp_PQA_maximal_CR(
             if k_star == 0:
                 pt_k_success[j].append(1)
                 pt_k_recall[j].append(0)
+                pt_k_precision[j].append(0)
+
                 if sample_ind != 0:
-                    pt_response_time[j].append(
-                        round(time.time() - PT_start + time_one_sample, 2)
-                    )
+                    pt_response_time[j].append(round(time.time() - PT_start, 2))
                 align, reject = HT_acc(
                     "PQA-PT",
                     [],
@@ -244,22 +249,23 @@ def exp_PQA_maximal_CR(
                 pt_k_rejH0[j].append(reject)
             else:
                 k_hat = ceil(k_star * (1 + j / 100))
-                ans = topk[:k_hat]
+                PT_ans = topk[:k_hat]
 
-                true_pos = len(np.intersect1d(ans, true_ans))
-                precision = true_pos / len(ans)
-                recall = true_pos / len(true_ans)
+                true_pos = len(np.intersect1d(PT_ans, true_ans_S))
+                precision = true_pos / len(PT_ans)
+                recall = true_pos / len(true_ans_S)
 
                 pt_k_success[j].append(int(precision >= pt))
                 pt_k_recall[j].append(recall)
+                pt_k_precision[j].append(precision)
+                pt_prop[j].append(len(PT_ans) / S_size)
+
                 if sample_ind != 0:
-                    pt_response_time[j].append(
-                        round(time.time() - PT_start + time_one_sample, 2)
-                    )
+                    pt_response_time[j].append(round(time.time() - PT_start, 2))
 
                 align, reject = HT_acc(
                     "PQA-PT",
-                    ans,
+                    PT_ans,
                     S_size,
                     op,
                     GT,
@@ -274,21 +280,23 @@ def exp_PQA_maximal_CR(
 
         for j in scale_list:
             k_hat = int(k_star * (1 + j / 100))
-            ans = topk[:k_hat]
+            RT_ans = topk[:k_hat]
 
-            true_pos = len(np.intersect1d(ans, true_ans))
-            precision = true_pos / len(ans)
-            recall = true_pos / len(true_ans)
+            true_pos = len(np.intersect1d(RT_ans, true_ans_S))
+            precision = true_pos / len(RT_ans)
+            recall = true_pos / len(true_ans_S)
 
             rt_k_success[j].append(int(recall >= rt))
-            rt_k_precis[j].append(precision)
+            rt_k_recall[j].append(recall)
+            rt_k_precision[j].append(precision)
             rt_response_time[j].append(
                 round(time.time() - RT_start + time_one_sample, 2)
             )
+            rt_prop[j].append(len(RT_ans) / S_size)
 
             align, reject = HT_acc(
                 "PQA-RT",
-                ans,
+                RT_ans,
                 S_size,
                 op,
                 GT,
@@ -300,19 +308,25 @@ def exp_PQA_maximal_CR(
     print("================================")
 
     backup_res = [
+        pt,
         factor,
         s,
         round(sum(pt_k_recall[0]) / len(pt_k_recall[0]), 4),
+        round(sum(pt_k_precision[0]) / len(pt_k_precision[0]), 4),
         round(sum(pt_k_success[0]) / len(pt_k_success[0]), 4),
         round(sum(pt_k_acc[0]) / len(pt_k_acc[0]), 4),
         round(sum(pt_k_rejH0[0]) / len(pt_k_rejH0[0]), 4),
         round(sum(pt_response_time[0]) / len(pt_response_time[0]), 4),
-        round(sum(rt_k_precis[0]) / len(rt_k_precis[0]), 4),
+        round(sum(pt_prop[0]) / len(pt_prop[0]), 4),
+        921,
+        round(sum(rt_k_recall[0]) / len(rt_k_recall[0]), 4),
+        round(sum(rt_k_precision[0]) / len(rt_k_precision[0]), 4),
         round(sum(rt_k_success[0]) / len(rt_k_success[0]), 4),
         round(sum(rt_k_acc[0]) / len(rt_k_acc[0]), 4),
         round(sum(rt_k_rejH0[0]) / len(rt_k_rejH0[0]), 4),
         round(sum(rt_response_time[0]) / len(rt_response_time[0]), 4),
-        prob,
+        round(sum(rt_prop[0]) / len(rt_prop[0]), 4),
+        921,
     ]
     if not is_precompile:
         Path(f"./results_NNH/PQA/").mkdir(parents=True, exist_ok=True)
@@ -321,7 +335,7 @@ def exp_PQA_maximal_CR(
             + fname
             + "_"
             + op
-            + f"_query{str(seed)}_{str(pt)[2:]}_0906_30.txt",
+            + f"_query{str(seed)}_{str(pt)[2:]}_0916_30_912.txt",
             "a",
         ) as file:
             results_str = "\t".join(map(str, backup_res)) + "\n"
@@ -405,7 +419,7 @@ if __name__ == "__main__":
     Proxy, Oracle = load_data(name=Fname)
 
     # NN algo parameters
-    Pt = Rt = 0.25
+    Pt = Rt = 0.556
     Prob = 0.95
     Dist_t = 0.85
     H1_op = "greater"
@@ -423,7 +437,8 @@ if __name__ == "__main__":
 
     if Fname == "icd9_eICU":
         # sample_size_list = [8000,8100,8200,8236]
-        sample_size_list = list(range(500, 4001, 500))
+        sample_size_list = [921]
+        # sample_size_list = list(range(500, 4001, 250))
     elif Fname == "icd9_mimic":
         # sample_size_list = [4000,4100,4200,4244]
         sample_size_list = list(range(1000, 4001, 1000))
@@ -431,8 +446,8 @@ if __name__ == "__main__":
 
     Proxy_dist, _ = preprocess_dist(Oracle, Proxy, Oracle[[Index[0]]])
     sync_Oracle = preprocess_sync(Proxy_dist, norm_scale)
-    true_ans = np.where(sync_Oracle <= Dist_t)[0]
-    print(f"the GT proportion is {(len(true_ans) / Oracle.shape[0])}")
+    true_ans_D = np.where(sync_Oracle <= Dist_t)[0]
+    print(f"the GT proportion is {(len(true_ans_D) / Oracle.shape[0])}")
 
     for fac in fac_list:
         print(f"H1: % NN w.r.t {Index} is {H1_op} {fac}")
@@ -441,7 +456,7 @@ if __name__ == "__main__":
                 Oracle,
                 sync_Oracle,
                 Proxy_dist,
-                true_ans,
+                true_ans_D,
                 pt=Pt,
                 rt=Rt,
                 t=Dist_t,
