@@ -135,21 +135,6 @@ def test_PQE_PT(oracle_dist, proxy_dist, bd, t=0.9, prob=0.9, pt=0.9):
 
     topk, phi = preprocess_topk_phi(proxy_dist, norm_scale=est_scale, t=t)
 
-    # # Step 3: Identify low-confidence points
-    # low_confidence_points = np.where(phi < 0.8)[0]
-
-    # # # Step 4: Sample from low-confidence points if enough points exist
-    # if len(low_confidence_points) >= bd:
-    #     samples = np.random.choice(low_confidence_points, size=bd, replace=False)
-    # else:
-    #     # If not enough low-confidence points, add some high-confidence points
-    #     high_confidence_points = np.where(phi >= 0.8)[0]
-    #     additional_samples = np.random.choice(
-    #         high_confidence_points, size=bd - len(low_confidence_points), replace=False
-    #     )
-    #     samples = np.concatenate([low_confidence_points, additional_samples])
-
-    # Step 5: Continue as usual with the precision and recall testing
     precision, recall, _, ans = test_PQA_PT(
         oracle_dist, phi, topk, t=t, prob=prob, pt=pt, pilots=samples
     )
@@ -164,22 +149,6 @@ def test_PQE_RT(oracle_dist, proxy_dist, bd, t=0.9, prob=0.9, rt=0.9):
     est_scale = np.std(oracle_dist[samples] - proxy_dist[samples]) + std_offset
 
     topk, phi = preprocess_topk_phi(proxy_dist, norm_scale=est_scale, t=t)
-
-    # # Step 3: Identify low-confidence points
-    # low_confidence_points = np.where(phi < 0.8)[0]
-
-    # # # Step 4: Sample from low-confidence points if enough points exist
-    # if len(low_confidence_points) >= bd:
-    #     samples = np.random.choice(low_confidence_points, size=bd, replace=False)
-    # else:
-    #     # If not enough low-confidence points, add some high-confidence points
-    #     high_confidence_points = np.where(phi >= 0.8)[0]
-    #     additional_samples = np.random.choice(
-    #         high_confidence_points, size=bd - len(low_confidence_points), replace=False
-    #     )
-    #     samples = np.concatenate([low_confidence_points, additional_samples])
-
-    # Step 5: Continue as usual with the precision and recall testing
 
     precision, recall, _, ans = test_PQA_RT(
         oracle_dist, phi, topk, t=t, prob=prob, rt=rt, pilots=samples
@@ -261,8 +230,8 @@ if __name__ == "__main__":
     # Pt = Rt = 0.72
     Prob = 0.95
     Dist_t = 0.85
-    H1_op = "less"
-    seed = 3
+    H1_op = "greater"
+    seed = 2
     print(f"Prob: {Prob}; r: {Dist_t}; seed: {seed}")
 
     num_query = 1
@@ -271,7 +240,7 @@ if __name__ == "__main__":
     np.random.seed(seed)
     Index = np.random.choice(range(len(Oracle_emb)), size=num_query, replace=False)
 
-    fac_list = np.arange(0.8, 1.25, 5)
+    fac_list = np.arange(0.8, 1.25, 0.05)
     fac_list = [round(num, 4) for num in fac_list]
 
     if Fname == "icd9_eICU":
@@ -294,12 +263,7 @@ if __name__ == "__main__":
 
     for sample_size in sample_size_list:
         print(f"sample size: {sample_size}")
-        for cost in [
-            int(sample_size / 10),
-            int(sample_size / 5),
-            int(sample_size / 2),
-            sample_size,
-        ]:
+        for cost in [sample_size]:
             for Pt in [0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95]:
                 rt_k_success = defaultdict(list)
                 rt_k_precision = defaultdict(list)
@@ -435,13 +399,13 @@ if __name__ == "__main__":
                         + Fname
                         + "_"
                         + H1_op
-                        + f"_query{str(seed)}_0921_30.txt",
+                        + f"_query{str(seed)}_attempt_30.txt",
                         "a",
                     ) as file:
                         results_str = "\t".join(map(str, backup_res)) + "\n"
                         file.write(results_str)
-                    # results_str = "\t".join(map(str, backup_res)) + "\n"
-                    # print(results_str)
+                # results_str = "\t".join(map(str, backup_res)) + "\n"
+                # print(results_str)
 
     end_time = time.time()
     print("execution time is %.2fs" % (end_time - start_time))

@@ -318,7 +318,7 @@ def exp_PQA_maximal_CR(
         round(sum(pt_k_rejH0[0]) / len(pt_k_rejH0[0]), 4),
         round(sum(pt_response_time[0]) / len(pt_response_time[0]), 4),
         round(sum(pt_prop[0]) / len(pt_prop[0]), 4),
-        921,
+        180,
         round(sum(rt_k_recall[0]) / len(rt_k_recall[0]), 4),
         round(sum(rt_k_precision[0]) / len(rt_k_precision[0]), 4),
         round(sum(rt_k_success[0]) / len(rt_k_success[0]), 4),
@@ -326,16 +326,16 @@ def exp_PQA_maximal_CR(
         round(sum(rt_k_rejH0[0]) / len(rt_k_rejH0[0]), 4),
         round(sum(rt_response_time[0]) / len(rt_response_time[0]), 4),
         round(sum(rt_prop[0]) / len(rt_prop[0]), 4),
-        921,
+        180,
     ]
     if not is_precompile:
-        Path(f"./results_NNH/PQA/").mkdir(parents=True, exist_ok=True)
+        Path(f"./results_NNH/PQA_new/").mkdir(parents=True, exist_ok=True)
         with open(
-            f"results_NNH/PQA/"
+            f"results_NNH/PQA_new/"
             + fname
             + "_"
             + op
-            + f"_query{str(seed)}_{str(pt)[2:]}_0916_30_912.txt",
+            + f"_query{str(seed)}_{str(t_star)[2:]}_0923_30.txt",
             "a",
         ) as file:
             results_str = "\t".join(map(str, backup_res)) + "\n"
@@ -419,16 +419,16 @@ if __name__ == "__main__":
     Proxy, Oracle = load_data(name=Fname)
 
     # NN algo parameters
-    Pt = Rt = 0.556
+    t_star = 0.625
+    Pt_list = [t_star - 0.1, t_star - 0.05, t_star + 0.05, t_star + 0.1, t_star]
     Prob = 0.95
     Dist_t = 0.85
-    H1_op = "greater"
-    seed = 1
-    print(f"Prob: {Prob}; r: {Dist_t}; seed: {seed}; Pt=Rt: {Pt}")
+    H1_op = "less"
+    seed = 4
+    print(f"Prob: {Prob}; r: {Dist_t}; seed: {seed}; Pt=Rt: {Pt_list}")
 
     num_query = 1
     num_sample = 30
-    # sampling_method = "RNS"
     np.random.seed(seed)
     Index = np.random.choice(range(len(Oracle)), size=num_query, replace=False)
 
@@ -437,7 +437,7 @@ if __name__ == "__main__":
 
     if Fname == "icd9_eICU":
         # sample_size_list = [8000,8100,8200,8236]
-        sample_size_list = [921]
+        sample_size_list = [320, 420, 520, 620]
         # sample_size_list = list(range(500, 4001, 250))
     elif Fname == "icd9_mimic":
         # sample_size_list = [4000,4100,4200,4244]
@@ -449,25 +449,27 @@ if __name__ == "__main__":
     true_ans_D = np.where(sync_Oracle <= Dist_t)[0]
     print(f"the GT proportion is {(len(true_ans_D) / Oracle.shape[0])}")
 
-    for fac in fac_list:
-        print(f"H1: % NN w.r.t {Index} is {H1_op} {fac}")
-        for sample_size in sample_size_list:
-            exp_PQA_maximal_CR(
-                Oracle,
-                sync_Oracle,
-                Proxy_dist,
-                true_ans_D,
-                pt=Pt,
-                rt=Rt,
-                t=Dist_t,
-                prob=Prob,
-                fname=Fname,
-                s=sample_size,
-                num_sample=num_sample,
-                op=H1_op,
-                factor=fac,
-                is_precompile=False,
-            )
+    for Pt in Pt_list:
+        Rt = Pt
+        for fac in fac_list:
+            print(f"H1: % NN w.r.t {Index} is {H1_op} {fac}")
+            for sample_size in sample_size_list:
+                exp_PQA_maximal_CR(
+                    Oracle,
+                    sync_Oracle,
+                    Proxy_dist,
+                    true_ans_D,
+                    pt=Pt,
+                    rt=Rt,
+                    t=Dist_t,
+                    prob=Prob,
+                    fname=Fname,
+                    s=sample_size,
+                    num_sample=num_sample,
+                    op=H1_op,
+                    factor=fac,
+                    is_precompile=False,
+                )
 
     end_time = time.time()
     print("execution time is %.2fs" % (end_time - start_time))

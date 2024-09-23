@@ -523,7 +523,6 @@ def exp_PQA_maximal_CR(
 
     if k_star == 0:
         print("k_star is 0")
-        pt_k_precision.append(np.nan)
         pt_k_recall.append(np.nan)
         prop.append(np.nan)
     else:
@@ -538,6 +537,8 @@ def exp_PQA_maximal_CR(
         pt_k_precision.append(precision)
         prop.append(len(ans) / sync_oracle.shape[0])
 
+    # print("time for a PT query:", round(time.time() - PT_start, 2))
+    # print("================================")
     return pt_k_recall[0], pt_k_precision[0], prop[0]
 
 
@@ -604,33 +605,9 @@ def one_proportion_z_test(
     return z_stat, p_value, reject
 
 
-def compute_CI(sample_size, observed_proportion, confidence_level=0.95):
-    """
-    Compute the margin of error (epsilon) for the given sample size and observed proportion.
-
-    Parameters:
-    sample_size (int): The size of the sample S
-    observed_proportion (float): The proportion of nearest neighbors (or any other proportion) in the sample S
-    confidence_level (float): The confidence level for the interval (default is 0.95 for 95% confidence)
-
-    Returns:
-    float: The margin of error (epsilon)
-    """
-    # Calculate the z-score for the given confidence level
-    z_score = norm.ppf(1 - (1 - confidence_level) / 2)
-
-    # Compute the margin of error (epsilon)
-    epsilon = z_score * np.sqrt(
-        (observed_proportion * (1 - observed_proportion)) / sample_size
-    )
-
-    return epsilon
-
-
 if __name__ == "__main__":
     Prob = 0.95
     Dist_t = 0.85
-    alpha = 0.05
     # seed = 3
 
     Fname = "icd9_eICU"
@@ -641,23 +618,13 @@ if __name__ == "__main__":
     pt_list = []
     rt_list = []
     t_list = []
-    m_list = []
     time_list = []
     prop_D_list = []
     prop_S_list = []
-    m_threshold = 0.05
-    t_threshold = 0.05
-    seed_list = [1, 1, 2, 3, 4]
-    for seed in seed_list:
+    epsilon = 0.01
+    for seed in [1, 1, 2, 3, 4]:
         print(f"seed is {seed}")
-        start_time = time.time()
         num_query = 1
-        t_max = 1
-        t_min = 0
-
-        Pt = 0.95
-        Rt = 0
-
         np.random.seed(seed)
         Index = np.random.choice(range(len(Oracle)), size=num_query, replace=False)
         print(f"The Index target patient is {Index}")
@@ -668,38 +635,28 @@ if __name__ == "__main__":
         prop_D = len(True_ans) / Oracle.shape[0]
         print(f"prop is {prop_D}")
 
-        m = 10
-        CI = float("inf")
-        print("\nstart computing sample size")
-        while m < 921:
-            prop_S_l = []
-            CI_l = []
+        t_max = 0.9
+        t_min = 0
 
-            for i in range(30):
-                indices = np.random.choice(len(sync_Oracle), m, replace=False)
-                sync_Oracle_S = sync_Oracle[indices]
-                Proxy_dist_S = Proxy_dist[indices]
-                True_ans_S = np.where(sync_Oracle_S <= Dist_t)[0]
-                S_size = sync_Oracle_S.shape[0]
-                prop_S = len(True_ans_S) / S_size
-                CI = compute_CI(m, prop_S, 1 - alpha)
+        Pt = 0.95
+        Rt = 0
 
-                prop_S_l.append(prop_S)
-                CI_l.append(CI)
+        m = 921
 
-            prop_S = np.mean(prop_S_l)
-            CI = np.mean(CI_l)
-            print(
-                f"The margin of error (epsilon) is: {CI:.4f}; prop in S is {prop_S:.4f}"
-            )
-            if CI <= m_threshold:
-                break
-            else:
-                m += 10
-        print(f"sample size is {m}")
+        start_time = time.time()
+        indices = np.random.choice(len(sync_Oracle), m, replace=False)
+        print(f"time is {time.time()-start_time}")
 
-        itr = 0
-        while abs(Pt - Rt) > t_threshold:
+        sync_Oracle_S = sync_Oracle[indices]
+        Proxy_dist_S = Proxy_dist[indices]
+        True_ans_S = np.where(sync_Oracle_S <= Dist_t)[0]
+        S_size = sync_Oracle_S.shape[0]
+
+        # Update prop_S based on the new sample
+        prop_S = len(True_ans_S) / S_size
+        print(f"proportion by S is {prop_S}")
+
+        while abs(Pt - Rt) > epsilon:
             t = (t_max + t_min) / 2
 
             # run PT query and get recall
@@ -718,11 +675,8 @@ if __name__ == "__main__":
                 t_max = t  # Precision is too high, decrease t
             else:
                 t_min = t  # Precision is too low, increase t
-            if itr > 100:
-                break
-            itr += 1
 
-        print(f"\nsample size is {m}, t* is Pt = {Pt}, Rt = {Rt}, t = {t}")
+        print(f"\nt* is Pt = {Pt}, Rt = {Rt}, t = {t}")
         time_spent = time.time() - start_time
         print("execution time is %.2fs" % (time_spent))
         print(f"total cost is {921}")
@@ -731,15 +685,13 @@ if __name__ == "__main__":
         prop_D_list.append(round(prop_D, 3))
         prop_S_list.append(round(prop_S, 3))
         t_list.append(round(t, 3))
-        m_list.append(m)
         pt_list.append(round(Pt, 3))
         rt_list.append(round(Rt, 3))
 
-    print("seed:\t" + "\t".join(map(str, seed_list)))
-    print("m:\t" + "\t".join(map(str, m_list)))
-    print("pt:\t" + "\t".join(map(str, pt_list)))
-    print("rt:\t" + "\t".join(map(str, rt_list)))
-    print("t*:\t" + "\t".join(map(str, t_list)))
-    print("prop_S:\t" + "\t".join(map(str, prop_S_list)))
-    print("prop_D:\t" + "\t".join(map(str, prop_D_list)))
-    print("time:\t" + "\t".join(map(str, time_list)))
+    # print("seed:: " + "\t".join(map(str, seed)))
+    print("pt:" + "\t".join(map(str, pt_list)))
+    print("rt:" + "\t".join(map(str, rt_list)))
+    print("t*:" + "\t".join(map(str, t_list)))
+    print("prop_S:" + "\t".join(map(str, prop_S_list)))
+    print("prop_D:" + "\t".join(map(str, prop_D_list)))
+    print("time:" + "\t".join(map(str, time_list)))
