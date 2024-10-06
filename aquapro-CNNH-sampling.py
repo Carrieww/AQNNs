@@ -1,25 +1,23 @@
+import time
+import pickle
+import numpy as np
+from numba import njit
+from scipy import stats
+from pathlib import Path
 from math import floor, ceil
+from scipy.stats import norm
 from collections import defaultdict
+from hyper_parameter import std_offset
 
 from aquapro_util import (
     load_data,
     preprocess_dist,
     preprocess_topk_phi,
-    preprocess_ranks,
 )
 from aquapro_util import (
     array_union,
     set_diff,
 )
-
-from numba import njit
-from hyper_parameter import std_offset
-import numpy as np
-
-# import pickle
-from pathlib import Path
-
-import time
 
 
 @njit
@@ -188,7 +186,7 @@ def test_PQE_RT(oracle_dist, proxy_dist, bd, t=0.9, prob=0.9, rt=0.9):
     return precision, recall, _, ans
 
 
-def HT_acc(name, ans, total, op, GT, prop_c):
+def HT_acc_prop(name, ans, total, op, GT, prop_c):
     print(f"finished {name} algorithm for q")
     print(f"FRNN result: {len(ans)}")
     print(f"total patients: {total}")
@@ -206,7 +204,50 @@ def HT_acc(name, ans, total, op, GT, prop_c):
     return align, reject
 
 
-from scipy.stats import norm
+def one_sample_t_test(l, c, alpha=0.05, alternative="two-sided"):
+    global rejectH0
+    t_stat, p_value = stats.ttest_1samp(l, popmean=c, alternative=alternative)
+    CI_lower, CI_upper = stats.t.interval(
+        confidence=1 - alpha,
+        df=len(l) - 1,
+        loc=np.mean(l),
+        scale=stats.sem(l),
+    )
+
+    if p_value < alpha:
+        rejectH0 = True
+        print(
+            f"The test (c = {c}, op = {alternative}) is significant, we shall reject the null hypothesis."
+        )
+    elif p_value >= alpha:
+        rejectH0 = False
+        print(
+            f"The test (c = {c}, op = {alternative}) is NOT significant, we shall accept the null hypothesis."
+        )
+    print(f"confidence interval is ({round(CI_lower,4), round(CI_upper,4)})")
+    return t_stat, p_value, rejectH0, CI_lower, CI_upper
+
+
+def HT_acc_t_test(l, c, operator, GT=None, is_D=False):
+    t_stat, p_value, rejectH0, CI_l, CI_h = one_sample_t_test(
+        l, c, alternative=operator
+    )
+
+    print("T-Statistic:", t_stat)
+    print("P-Value:", p_value)
+
+    if is_D:
+        align = True
+        print(f"The ans in D to reject H0 result is : {rejectH0}")
+        print("align with ground truth?", align)
+
+    else:
+        print(f"The ans to reject H0 result is : {rejectH0}")
+        assert GT is not None, "GT is None"
+        align = rejectH0 == GT
+        print("align with ground truth?", align)
+
+    return align, rejectH0, CI_l, CI_h
 
 
 def one_proportion_z_test(
@@ -251,7 +292,41 @@ def one_proportion_z_test(
     return z_stat, p_value, reject
 
 
-# pre_compile()
+def get_data(filename=None, is_text=False):
+    if is_text:
+        instance_list = (np.loadtxt(filename) >= 0).astype(int)
+    else:
+        instance_list = pickle.load(open(filename, "rb"), encoding="latin1")
+
+    return instance_list
+
+
+def is_int(string):
+    try:
+        int(string)
+        return True
+    except ValueError:
+        return False
+
+
+def agg_value(D, ind_list, attr_id, agg):
+    l = []
+    for ans_id in ind_list:
+        value = D[ans_id][2][attr_id]
+        if is_int(value):
+            value = int(value)
+            if not np.isnan(value):
+                l.append(int(value))
+        else:
+            pass
+
+    if agg == "mean":
+        res = sum(l) / len(l)
+    else:
+        raise Exception(f"The case for {agg} has not been implemented yet")
+    return l, res
+
+
 if __name__ == "__main__":
     start_time = time.time()
     Fname = "icd9_eICU"
@@ -261,17 +336,35 @@ if __name__ == "__main__":
     Prob = 0.95
     Dist_t = 0.85
     H1_op = "greater"
-    seed_l = [1, 2, 3, 4]
+    seed_l = [1, 2]
     print(f"Prob: {Prob}; r: {Dist_t}; seed list: {seed_l}")
 
+    save_path = f"results_CNNH/RS/" + Fname + "_" + H1_op + f"_1006.txt"
+    Path(f"./results_CNNH/RS/").mkdir(parents=True, exist_ok=True)
+    with open(
+        save_path,
+        "a",
+    ) as file:
+        file.write(
+            "seed\tsample size\tavg prop_S\tavg lower CI\tavg upper CI\tavg acc\tavg rejH0\tavg time\n"
+        )
+
+    D_attr = get_data(filename="data/eICU_new/" + Fname + ".testfull")
+    agg = "mean"
+    attr = "age"
+    attr_id = 1
+    subject = "of NNs of q"
+    print(f"Prob: {Prob}; r: {Dist_t}")
+    print(f"H1: {agg} {attr} {subject} is {H1_op}")
+
     num_query = 1
-    num_sample = 5
-    fac_list = np.arange(0.8, 1.25, 5)
+    num_sample = 30
+    fac_list = np.arange(0.5, 0.61, 0.05)
     fac_list = [round(num, 4) for num in fac_list]
 
     if Fname == "icd9_eICU":
         # sample_size_list = [8000,8100,8200,8236]
-        sample_size_list = [200, 400, 600, 800, 1000]
+        sample_size_list = list(range(200, 510, 200))
         # sample_size_list = list(range(500, 4001, 500))
     elif Fname == "icd9_mimic":
         # sample_size_list = [4000,4100,4200,4244]
@@ -285,17 +378,23 @@ if __name__ == "__main__":
         Proxy_dist, Oracle_dist = preprocess_dist(
             Oracle_emb, Proxy_emb, Oracle_emb[[Index[0]]]
         )
-        # Ranks = preprocess_ranks(Proxy_dist)
         true_ans_D = np.where(Oracle_dist <= Dist_t)[0]
+        l_D, agg_D = agg_value(D_attr, true_ans_D, attr_id, agg)
 
-        prop_D = len(true_ans_D) / Oracle_dist.shape[0]
-        print(f"the GT proportion is {(prop_D)}")
+        _, agg_D_full = agg_value(D_attr, range(len(D_attr)), attr_id, agg)
+        print(
+            f"The number of NN in D is {len(true_ans_D)} ({len(true_ans_D)/Proxy_dist.shape[0]}%), the GT aggregated value of NN is {agg_D} and the aggregated value in D is {agg_D_full}"
+        )
 
         for sample_size in sample_size_list:
             print(f"sample size: {sample_size}")
-            acc_l = defaultdict(list)
-            rejH0_l = defaultdict(list)
-            time_l = defaultdict(list)
+            acc_l = []
+            rejH0_l = []
+            time_l = []
+            agg_S_l = []
+            CI_l_S_l = []
+            CI_h_S_l = []
+
             for sample_ind in range(num_sample):
                 one_sample_start = time.time()
 
@@ -308,51 +407,48 @@ if __name__ == "__main__":
                 S_size = oracle_dist_S.shape[0]
 
                 true_ans_S = np.where(oracle_dist_S <= Dist_t)[0]
+                l_S, agg_S = agg_value(D_attr, true_ans_S, attr_id, agg)
                 print(
-                    f"prop_S at {sample_ind}-th sample is: ",
-                    true_ans_S.shape[0] / S_size,
+                    f"The number of NN in S is {len(true_ans_S)} ({len(true_ans_S)/proxy_dist_S.shape[0]}%), the aggregated value is {agg_S}"
                 )
+
                 time_one_sample = time.time() - one_sample_start
 
                 for fac in fac_list:
                     c_time_GT = (len(true_ans_D) / Oracle_dist.shape[0]) * fac
                     print(f">>> c is {c_time_GT}")
-                    _, _, GT = one_proportion_z_test(
-                        len(true_ans_D),
-                        Oracle_dist.shape[0],
-                        c_time_GT,
-                        0.05,
-                        H1_op,
-                    )
-                    print(f"the ground truth to reject H0 result is : {GT}")
-                    align, reject = HT_acc(
-                        "RNS",
-                        true_ans_S,
-                        S_size,
-                        H1_op,
-                        GT,
-                        c_time_GT,
-                    )
-                    acc_l[fac].append(align)
-                    rejH0_l[fac].append(reject)
-                    time_l[fac].append(time_one_sample)
 
-            Path(f"./results_NNH/RS/").mkdir(parents=True, exist_ok=True)
-            for fac in fac_list:
-                backup_res = [
-                    seed,
-                    fac,
-                    sample_size,
-                    round(sum(acc_l[fac]) / len(acc_l[fac]), 4),
-                    round(sum(rejH0_l[fac]) / len(rejH0_l[fac]), 4),
-                    round(sum(time_l[fac]) / len(time_l[fac]), 4),
-                ]
-                with open(
-                    f"results_NNH/RN/" + Fname + "_" + H1_op + f"_0926_30.txt",
-                    "a",
-                ) as file:
-                    results_str = "\t".join(map(str, backup_res)) + "\n"
-                    file.write(results_str)
+                    _, GT, GT_CI_l, GT_CI_h = HT_acc_t_test(
+                        l_D, c_time_GT, H1_op, is_D=True
+                    )
+
+                    print(f"the ground truth to reject H0 result is : {GT}")
+                    align_S, rej_S, CI_l_S, CI_h_S = HT_acc_t_test(
+                        l_S, c_time_GT, H1_op, GT=GT, is_D=False
+                    )
+                    acc_l.append(align_S)
+                    rejH0_l.append(rej_S)
+                    time_l.append(time_one_sample)
+                    agg_S_l.append(agg_S)
+                    CI_l_S_l.append(CI_l_S)
+                    CI_h_S_l.append(CI_h_S)
+
+            backup_res = [
+                seed,
+                sample_size,
+                round(np.mean(agg_S_l), 4),
+                round(np.mean(CI_l_S_l), 4),
+                round(np.mean(CI_h_S_l), 4),
+                round(np.mean(acc_l), 4),
+                round(np.mean(rejH0_l), 4),
+                round(np.mean(time_l), 4),
+            ]
+            with open(
+                save_path,
+                "a",
+            ) as file:
+                results_str = "\t".join(map(str, backup_res)) + "\n"
+                file.write(results_str)
 
     end_time = time.time()
     print("execution time is %.2fs" % (end_time - start_time))
