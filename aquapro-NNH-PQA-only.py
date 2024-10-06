@@ -164,7 +164,6 @@ def test_PQE_RT(oracle_dist, proxy_dist, bd, t=0.9, prob=0.9, rt=0.9):
 
 
 def exp_PQA_maximal_CR(
-    oracle,
     sync_oracle,
     proxy_dist,
     true_ans,
@@ -173,11 +172,9 @@ def exp_PQA_maximal_CR(
     t=0.9,
     prob=0.9,
     fname="",
-    is_precompile=False,
-    s=1000,
-    num_sample=1,
     op="two-sided",
     factor=0.9,
+    is_precompile=False,
 ):
     rt_k_success = defaultdict(list)
     rt_k_precision = defaultdict(list)
@@ -195,122 +192,95 @@ def exp_PQA_maximal_CR(
     pt_prop = defaultdict(list)
 
     scale_list = np.array([0])
-    oracle_ori = oracle
 
-    # we only concern when len(index) = 1, one query only
-    query_time_start = time.time()
-
-    c_time_GT = (len(true_ans) / oracle_ori.shape[0]) * factor
+    c_time_GT = (len(true_ans) / sync_oracle.shape[0]) * factor
     print(f"c is {c_time_GT}")
     _, _, GT = one_proportion_z_test(
-        len(true_ans), oracle_ori.shape[0], c_time_GT, 0.05, op
+        len(true_ans), sync_oracle.shape[0], c_time_GT, 0.05, op
     )
     print(f"the ground truth to reject H0 result is : {GT}")
 
-    num_sample = num_sample
+    # PQA-PT-sync
+    topk, phi = preprocess_topk_phi(proxy_dist, norm_scale=norm_scale, t=t)
+    PT_start = time.time()
+    _, _, k_star = test_PQA_PT(sync_oracle, phi, topk, t=t, prob=prob, pt=pt)
 
-    for sample_ind in range(num_sample):
-        if oracle_ori.shape[0] < s:
-            raise ValueError("Sample size cannot be larger than the dataset size.")
-
-        one_sample_start = time.time()
-
-        indices = np.random.choice(len(sync_oracle), s, replace=False)
-        sync_oracle_S = sync_oracle[indices]
-        proxy_dist_S = proxy_dist[indices]
-        S_size = sync_oracle_S.shape[0]
-
-        true_ans_S = np.where(sync_oracle_S <= t)[0]
-        print(f"prop_S at {sample_ind}-th sample is: ", true_ans_S.shape[0] / S_size)
-        time_one_sample = time.time() - one_sample_start
-
-        # PQA-PT-sync
-        topk, phi = preprocess_topk_phi(proxy_dist_S, norm_scale=norm_scale, t=t)
-        PT_start = time.time()
-        _, _, k_star = test_PQA_PT(sync_oracle_S, phi, topk, t=t, prob=prob, pt=pt)
-
-        for j in scale_list:
-            if k_star == 0:
-                pt_k_success[j].append(1)
-                pt_k_recall[j].append(0)
-                pt_k_precision[j].append(0)
-
-                if sample_ind != 0:
-                    pt_response_time[j].append(round(time.time() - PT_start, 2))
-                align, reject = HT_acc(
-                    "PQA-PT",
-                    [],
-                    S_size,
-                    op,
-                    GT,
-                    prop_default=c_time_GT,
-                )
-                pt_k_acc[j].append(align)
-                pt_k_rejH0[j].append(reject)
-            else:
-                k_hat = ceil(k_star * (1 + j / 100))
-                PT_ans = topk[:k_hat]
-
-                true_pos = len(np.intersect1d(PT_ans, true_ans_S))
-                precision = true_pos / len(PT_ans)
-                recall = true_pos / len(true_ans_S)
-
-                pt_k_success[j].append(int(precision >= pt))
-                pt_k_recall[j].append(recall)
-                pt_k_precision[j].append(precision)
-                pt_prop[j].append(len(PT_ans) / S_size)
-
-                if sample_ind != 0:
-                    pt_response_time[j].append(round(time.time() - PT_start, 2))
-
-                align, reject = HT_acc(
-                    "PQA-PT",
-                    PT_ans,
-                    S_size,
-                    op,
-                    GT,
-                    prop_default=c_time_GT,
-                )
-                pt_k_acc[j].append(align)
-                pt_k_rejH0[j].append(reject)
-
-        # PQA-RT-sync
-        RT_start = time.time()
-        _, _, k_star = test_PQA_RT(sync_oracle_S, phi, topk, t=t, prob=prob, rt=rt)
-
-        for j in scale_list:
-            k_hat = int(k_star * (1 + j / 100))
-            RT_ans = topk[:k_hat]
-
-            true_pos = len(np.intersect1d(RT_ans, true_ans_S))
-            precision = true_pos / len(RT_ans)
-            recall = true_pos / len(true_ans_S)
-
-            rt_k_success[j].append(int(recall >= rt))
-            rt_k_recall[j].append(recall)
-            rt_k_precision[j].append(precision)
-            rt_response_time[j].append(
-                round(time.time() - RT_start + time_one_sample, 2)
-            )
-            rt_prop[j].append(len(RT_ans) / S_size)
+    for j in scale_list:
+        if k_star == 0:
+            pt_k_success[j].append(0)
+            pt_k_recall[j].append(0)
+            pt_k_precision[j].append(0)
 
             align, reject = HT_acc(
-                "PQA-RT",
-                RT_ans,
-                S_size,
+                "PQA-PT",
+                [],
+                sync_oracle.shape[0],
                 op,
                 GT,
                 prop_default=c_time_GT,
             )
-            rt_k_acc[j].append(align)
-            rt_k_rejH0[j].append(reject)
-    print("time for a query:", round(time.time() - query_time_start, 2))
+            pt_k_acc[j].append(align)
+            pt_k_rejH0[j].append(reject)
+        else:
+            k_hat = ceil(k_star * (1 + j / 100))
+            PT_ans = topk[:k_hat]
+
+            true_pos = len(np.intersect1d(PT_ans, true_ans))
+            precision = true_pos / len(PT_ans)
+            recall = true_pos / len(true_ans)
+
+            pt_k_success[j].append(int(precision >= pt))
+            pt_k_recall[j].append(recall)
+            pt_k_precision[j].append(precision)
+            pt_response_time[j].append(round(time.time() - PT_start, 2))
+            pt_prop[j].append(len(PT_ans) / sync_oracle.shape[0])
+
+            align, reject = HT_acc(
+                "PQA-PT",
+                PT_ans,
+                sync_oracle.shape[0],
+                op,
+                GT,
+                prop_default=c_time_GT,
+            )
+
+            pt_k_acc[j].append(align)
+            pt_k_rejH0[j].append(reject)
+
+    # PQA-RT-sync
+    RT_start = time.time()
+    _, _, k_star = test_PQA_RT(sync_oracle, phi, topk, t=t, prob=prob, rt=rt)
+
+    for j in scale_list:
+        k_hat = int(k_star * (1 + j / 100))
+        RT_ans = topk[:k_hat]
+
+        true_pos = len(np.intersect1d(RT_ans, true_ans))
+        precision = true_pos / len(RT_ans)
+        recall = true_pos / len(true_ans)
+
+        rt_k_success[j].append(int(recall >= rt))
+        rt_k_recall[j].append(recall)
+        rt_k_precision[j].append(precision)
+        rt_response_time[j].append(round(time.time() - RT_start, 2))
+        rt_prop[j].append(len(RT_ans) / sync_oracle.shape[0])
+
+        align, reject = HT_acc(
+            "PQA-RT",
+            RT_ans,
+            sync_oracle.shape[0],
+            op,
+            GT,
+            prop_default=c_time_GT,
+        )
+        rt_k_acc[j].append(align)
+        rt_k_rejH0[j].append(reject)
+    # print("time for a query:", round(time.time() - query_time_start, 2))
     print("================================")
 
     backup_res = [
         pt,
         factor,
-        s,
         round(sum(pt_k_recall[0]) / len(pt_k_recall[0]), 4),
         round(sum(pt_k_precision[0]) / len(pt_k_precision[0]), 4),
         round(sum(pt_k_success[0]) / len(pt_k_success[0]), 4),
@@ -318,7 +288,7 @@ def exp_PQA_maximal_CR(
         round(sum(pt_k_rejH0[0]) / len(pt_k_rejH0[0]), 4),
         round(sum(pt_response_time[0]) / len(pt_response_time[0]), 4),
         round(sum(pt_prop[0]) / len(pt_prop[0]), 4),
-        180,
+        rt,
         round(sum(rt_k_recall[0]) / len(rt_k_recall[0]), 4),
         round(sum(rt_k_precision[0]) / len(rt_k_precision[0]), 4),
         round(sum(rt_k_success[0]) / len(rt_k_success[0]), 4),
@@ -326,16 +296,15 @@ def exp_PQA_maximal_CR(
         round(sum(rt_k_rejH0[0]) / len(rt_k_rejH0[0]), 4),
         round(sum(rt_response_time[0]) / len(rt_response_time[0]), 4),
         round(sum(rt_prop[0]) / len(rt_prop[0]), 4),
-        180,
     ]
     if not is_precompile:
-        Path(f"./results_NNH/PQA_new/").mkdir(parents=True, exist_ok=True)
+        Path(f"./results_NNH/PQA-only/").mkdir(parents=True, exist_ok=True)
         with open(
-            f"results_NNH/PQA_new/"
+            f"results_NNH/PQA-only/"
             + fname
             + "_"
             + op
-            + f"_query{str(seed)}_{str(t_star)[2:]}_0923_30.txt",
+            + f"_query{str(seed)}_0927_30.txt",
             "a",
         ) as file:
             results_str = "\t".join(map(str, backup_res)) + "\n"
@@ -354,7 +323,7 @@ def HT_acc(name, ans, total, op, GT, prop_default=None):
         prop = prop_default
     else:
         prop = len(ans) / total
-    print(f"D proportion: {prop}; approx: {len(ans) / total}")
+    print(f"D proportion or c: {prop}; approx: {len(ans) / total}")
     z_stat, p_value, reject = one_proportion_z_test(len(ans), total, prop, 0.05, op)
 
     print("Z-Statistic:", z_stat)
@@ -419,20 +388,20 @@ if __name__ == "__main__":
     Proxy, Oracle = load_data(name=Fname)
 
     # NN algo parameters
-    t_star = 0.625
-    Pt_list = [t_star - 0.1, t_star - 0.05, t_star + 0.05, t_star + 0.1, t_star]
+    # t_star = 0.625
+    Pt_list = [0.6, 0.7]
     Prob = 0.95
     Dist_t = 0.85
     H1_op = "less"
-    seed = 4
+    seed = 1
     print(f"Prob: {Prob}; r: {Dist_t}; seed: {seed}; Pt=Rt: {Pt_list}")
 
     num_query = 1
-    num_sample = 30
+    # num_sample = 50
     np.random.seed(seed)
     Index = np.random.choice(range(len(Oracle)), size=num_query, replace=False)
 
-    fac_list = np.arange(0.8, 1.25, 0.05)
+    fac_list = np.arange(0.8, 1.25, 0.5)
     fac_list = [round(num, 4) for num in fac_list]
 
     if Fname == "icd9_eICU":
@@ -451,11 +420,11 @@ if __name__ == "__main__":
 
     for Pt in Pt_list:
         Rt = Pt
+        print(f"pt = rt = {Pt}")
         for fac in fac_list:
             print(f"H1: % NN w.r.t {Index} is {H1_op} {fac}")
             for sample_size in sample_size_list:
                 exp_PQA_maximal_CR(
-                    Oracle,
                     sync_Oracle,
                     Proxy_dist,
                     true_ans_D,
@@ -464,8 +433,6 @@ if __name__ == "__main__":
                     t=Dist_t,
                     prob=Prob,
                     fname=Fname,
-                    s=sample_size,
-                    num_sample=num_sample,
                     op=H1_op,
                     factor=fac,
                     is_precompile=False,

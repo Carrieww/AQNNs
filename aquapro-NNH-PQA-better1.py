@@ -1,5 +1,11 @@
+import time
+import numpy as np
+from numba import njit
+from pathlib import Path
+from scipy.stats import norm
 from math import floor, ceil
 from collections import defaultdict
+from hyper_parameter import norm_scale, std_offset
 
 from aquapro_util import (
     load_data,
@@ -11,22 +17,6 @@ from aquapro_util import (
     array_union,
     set_diff,
 )
-
-# from aquapro_util import (
-#     baseline_topk_phi_i,
-#     baseline_topk_pi,
-#     baseline_topk_topc_tableu,
-#     baseline_topk_xf,
-# )
-
-from numba import njit
-from hyper_parameter import norm_scale, std_offset
-import numpy as np
-
-# import pickle
-from pathlib import Path
-
-import time
 
 
 @njit
@@ -163,157 +153,6 @@ def test_PQE_RT(oracle_dist, proxy_dist, bd, t=0.9, prob=0.9, rt=0.9):
     return precision, recall, _
 
 
-def exp_PQA_maximal_CR(
-    sync_oracle,
-    proxy_dist,
-    true_ans,
-    pt=0.9,
-    rt=0.9,
-    t=0.9,
-    prob=0.9,
-    fname="",
-    op="two-sided",
-    factor=0.9,
-    is_precompile=False,
-):
-    rt_k_success = defaultdict(list)
-    rt_k_precision = defaultdict(list)
-    rt_k_recall = defaultdict(list)
-    rt_k_acc = defaultdict(list)
-    rt_k_rejH0 = defaultdict(list)
-    rt_response_time = defaultdict(list)
-    rt_prop = defaultdict(list)
-    pt_k_success = defaultdict(list)
-    pt_k_recall = defaultdict(list)
-    pt_k_precision = defaultdict(list)
-    pt_k_acc = defaultdict(list)
-    pt_response_time = defaultdict(list)
-    pt_k_rejH0 = defaultdict(list)
-    pt_prop = defaultdict(list)
-
-    scale_list = np.array([0])
-
-    c_time_GT = (len(true_ans) / sync_oracle.shape[0]) * factor
-    print(f"c is {c_time_GT}")
-    _, _, GT = one_proportion_z_test(
-        len(true_ans), sync_oracle.shape[0], c_time_GT, 0.05, op
-    )
-    print(f"the ground truth to reject H0 result is : {GT}")
-
-    # PQA-PT-sync
-    topk, phi = preprocess_topk_phi(proxy_dist, norm_scale=norm_scale, t=t)
-    PT_start = time.time()
-    _, _, k_star = test_PQA_PT(sync_oracle, phi, topk, t=t, prob=prob, pt=pt)
-
-    for j in scale_list:
-        if k_star == 0:
-            pt_k_success[j].append(0)
-            pt_k_recall[j].append(0)
-            pt_k_precision[j].append(0)
-
-            align, reject = HT_acc(
-                "PQA-PT",
-                [],
-                sync_oracle.shape[0],
-                op,
-                GT,
-                prop_default=c_time_GT,
-            )
-            pt_k_acc[j].append(align)
-            pt_k_rejH0[j].append(reject)
-        else:
-            k_hat = ceil(k_star * (1 + j / 100))
-            PT_ans = topk[:k_hat]
-
-            true_pos = len(np.intersect1d(PT_ans, true_ans))
-            precision = true_pos / len(PT_ans)
-            recall = true_pos / len(true_ans)
-
-            pt_k_success[j].append(int(precision >= pt))
-            pt_k_recall[j].append(recall)
-            pt_k_precision[j].append(precision)
-            pt_response_time[j].append(round(time.time() - PT_start, 2))
-            pt_prop[j].append(len(PT_ans) / sync_oracle.shape[0])
-
-            align, reject = HT_acc(
-                "PQA-PT",
-                PT_ans,
-                sync_oracle.shape[0],
-                op,
-                GT,
-                prop_default=c_time_GT,
-            )
-
-            pt_k_acc[j].append(align)
-            pt_k_rejH0[j].append(reject)
-
-    # PQA-RT-sync
-    RT_start = time.time()
-    _, _, k_star = test_PQA_RT(sync_oracle, phi, topk, t=t, prob=prob, rt=rt)
-
-    for j in scale_list:
-        k_hat = int(k_star * (1 + j / 100))
-        RT_ans = topk[:k_hat]
-
-        true_pos = len(np.intersect1d(RT_ans, true_ans))
-        precision = true_pos / len(RT_ans)
-        recall = true_pos / len(true_ans)
-
-        rt_k_success[j].append(int(recall >= rt))
-        rt_k_recall[j].append(recall)
-        rt_k_precision[j].append(precision)
-        rt_response_time[j].append(round(time.time() - RT_start, 2))
-        rt_prop[j].append(len(RT_ans) / sync_oracle.shape[0])
-
-        align, reject = HT_acc(
-            "PQA-RT",
-            RT_ans,
-            sync_oracle.shape[0],
-            op,
-            GT,
-            prop_default=c_time_GT,
-        )
-        rt_k_acc[j].append(align)
-        rt_k_rejH0[j].append(reject)
-    # print("time for a query:", round(time.time() - query_time_start, 2))
-    print("================================")
-
-    backup_res = [
-        pt,
-        factor,
-        round(sum(pt_k_recall[0]) / len(pt_k_recall[0]), 4),
-        round(sum(pt_k_precision[0]) / len(pt_k_precision[0]), 4),
-        round(sum(pt_k_success[0]) / len(pt_k_success[0]), 4),
-        round(sum(pt_k_acc[0]) / len(pt_k_acc[0]), 4),
-        round(sum(pt_k_rejH0[0]) / len(pt_k_rejH0[0]), 4),
-        round(sum(pt_response_time[0]) / len(pt_response_time[0]), 4),
-        round(sum(pt_prop[0]) / len(pt_prop[0]), 4),
-        rt,
-        round(sum(rt_k_recall[0]) / len(rt_k_recall[0]), 4),
-        round(sum(rt_k_precision[0]) / len(rt_k_precision[0]), 4),
-        round(sum(rt_k_success[0]) / len(rt_k_success[0]), 4),
-        round(sum(rt_k_acc[0]) / len(rt_k_acc[0]), 4),
-        round(sum(rt_k_rejH0[0]) / len(rt_k_rejH0[0]), 4),
-        round(sum(rt_response_time[0]) / len(rt_response_time[0]), 4),
-        round(sum(rt_prop[0]) / len(rt_prop[0]), 4),
-    ]
-    if not is_precompile:
-        Path(f"./results_NNH/PQA-only/").mkdir(parents=True, exist_ok=True)
-        with open(
-            f"results_NNH/PQA-only/"
-            + fname
-            + "_"
-            + op
-            + f"_query{str(seed)}_0927_30.txt",
-            "a",
-        ) as file:
-            results_str = "\t".join(map(str, backup_res)) + "\n"
-            file.write(results_str)
-    else:
-        results_str = "\t".join(map(str, backup_res)) + "\n"
-        print(results_str)
-
-
 def HT_acc(name, ans, total, op, GT, prop_default=None):
     print(f"finished {name} algorithm for q")
     print(f"FRNN result: {len(ans)}")
@@ -334,9 +173,6 @@ def HT_acc(name, ans, total, op, GT, prop_default=None):
     print("align:", align)
 
     return align, reject
-
-
-from scipy.stats import norm
 
 
 def one_proportion_z_test(
@@ -388,55 +224,121 @@ if __name__ == "__main__":
     Proxy, Oracle = load_data(name=Fname)
 
     # NN algo parameters
-    # t_star = 0.625
-    Pt_list = [0.6, 0.7]
     Prob = 0.95
     Dist_t = 0.85
-    H1_op = "less"
-    seed = 1
-    print(f"Prob: {Prob}; r: {Dist_t}; seed: {seed}; Pt=Rt: {Pt_list}")
+    H1_op = "greater"
+    for seed in [1, 2, 3, 4]:
+        print(f"Prob: {Prob}; r: {Dist_t}; seed: {seed}")
 
-    num_query = 1
-    # num_sample = 50
-    np.random.seed(seed)
-    Index = np.random.choice(range(len(Oracle)), size=num_query, replace=False)
+        num_query = 1
+        np.random.seed(seed)
+        Index = np.random.choice(range(len(Oracle)), size=num_query, replace=False)
 
-    fac_list = np.arange(0.8, 1.25, 0.5)
-    fac_list = [round(num, 4) for num in fac_list]
+        fac_list = np.arange(0.8, 1.25, 0.05)
+        fac_list = [round(num, 4) for num in fac_list]
 
-    if Fname == "icd9_eICU":
-        # sample_size_list = [8000,8100,8200,8236]
-        sample_size_list = [320, 420, 520, 620]
-        # sample_size_list = list(range(500, 4001, 250))
-    elif Fname == "icd9_mimic":
-        # sample_size_list = [4000,4100,4200,4244]
-        sample_size_list = list(range(1000, 4001, 1000))
-    res = defaultdict(list)
+        # res = defaultdict(list)
 
-    Proxy_dist, _ = preprocess_dist(Oracle, Proxy, Oracle[[Index[0]]])
-    sync_Oracle = preprocess_sync(Proxy_dist, norm_scale)
-    true_ans_D = np.where(sync_Oracle <= Dist_t)[0]
-    print(f"the GT proportion is {(len(true_ans_D) / Oracle.shape[0])}")
+        Proxy_dist, _ = preprocess_dist(Oracle, Proxy, Oracle[[Index[0]]])
+        sync_Oracle = preprocess_sync(Proxy_dist, norm_scale)
+        true_ans_D = np.where(sync_Oracle <= Dist_t)[0]
+        print(f"the GT proportion is {(len(true_ans_D) / Oracle.shape[0])}")
 
-    for Pt in Pt_list:
-        Rt = Pt
-        print(f"pt = rt = {Pt}")
+        rt_k_precision = defaultdict(list)
+        rt_k_recall = defaultdict(list)
+        rt_k_acc = defaultdict(list)
+        rt_k_rejH0 = defaultdict(list)
+        rt_response_time = defaultdict(list)
+        rt_prop = defaultdict(list)
+        rt_cost = defaultdict(list)
+
+        # PQA-RT-sync
+        RT_start = time.time()
+        topk, phi = preprocess_topk_phi(Proxy_dist, norm_scale=norm_scale, t=Dist_t)
+        oracle_call_set = set()
+        epsilon = 0.01
+        itr = 0
+        rt_max = 0.8
+        rt_min = 0
+        while itr < 100:
+            print(f">>> iteration for finding t*: {itr}")
+            rt = (rt_max + rt_min) / 2
+            print(f"rt is {rt}")
+
+            _, _, k_star = test_PQA_RT(
+                sync_Oracle, phi, topk, t=Dist_t, prob=Prob, rt=rt
+            )
+            k_hat = int(k_star * (1 + 0 / 100))
+            RT_ans = topk[:k_hat]
+            oracle_call_set.update(RT_ans)
+            true_pos = len(np.intersect1d(RT_ans, true_ans_D))
+
+            precision = true_pos / len(RT_ans)
+            print(f"precision is {precision}")
+            if precision > rt:
+                rt_min = rt
+            else:
+                rt_max = rt
+
+            if abs(precision - rt) < epsilon:
+                break
+            else:
+                itr += 1
+        recall = true_pos / len(true_ans_D)
+        response_time = round(time.time() - RT_start, 2)
+
         for fac in fac_list:
-            print(f"H1: % NN w.r.t {Index} is {H1_op} {fac}")
-            for sample_size in sample_size_list:
-                exp_PQA_maximal_CR(
-                    sync_Oracle,
-                    Proxy_dist,
-                    true_ans_D,
-                    pt=Pt,
-                    rt=Rt,
-                    t=Dist_t,
-                    prob=Prob,
-                    fname=Fname,
-                    op=H1_op,
-                    factor=fac,
-                    is_precompile=False,
-                )
+            c_time_GT = (len(true_ans_D) / sync_Oracle.shape[0]) * fac
+            print(f"H1: % NN w.r.t {Index} is {H1_op} {c_time_GT}")
+            _, _, GT = one_proportion_z_test(
+                len(true_ans_D), sync_Oracle.shape[0], c_time_GT, 0.05, H1_op
+            )
+            print(f"the ground truth to reject H0 result is : {GT}")
+            align, reject = HT_acc(
+                "PQA-RT",
+                RT_ans,
+                sync_Oracle.shape[0],
+                H1_op,
+                GT,
+                prop_default=c_time_GT,
+            )
+            rt_k_acc[fac].append(align)
+            rt_k_rejH0[fac].append(reject)
+            rt_k_precision[fac].append(precision)
+            rt_k_recall[fac].append(recall)
+            rt_cost[fac].append(len(oracle_call_set))
+            rt_response_time[fac].append(response_time)
+            rt_prop[fac].append(len(RT_ans) / sync_Oracle.shape[0])
+
+        print("================================")
+
+        Path(f"./results_NNH/PQA-better1/").mkdir(parents=True, exist_ok=True)
+        for fac in fac_list:
+            backup_res = [
+                rt,
+                seed,
+                fac,
+                round(np.mean(rt_cost[fac]), 4),
+                round(np.mean(rt_k_recall[fac]), 4),
+                round(np.mean(rt_k_precision[fac]), 4),
+                round(np.mean(rt_k_acc[fac]), 4),
+                round(np.mean(rt_k_rejH0[fac]), 4),
+                round(np.mean(rt_response_time[fac]), 4),
+                round(np.mean(rt_prop[fac]), 4),
+            ]
+            with open(
+                f"results_NNH/PQA-better1/"
+                + Fname
+                + "_"
+                + H1_op
+                + f"_0927_version2.txt",
+                "a",
+            ) as file:
+                results_str = "\t".join(map(str, backup_res)) + "\n"
+                file.write(results_str)
+
+        # results_str = "\t".join(map(str, backup_res)) + "\n"
+        # print(results_str)
 
     end_time = time.time()
     print("execution time is %.2fs" % (end_time - start_time))
