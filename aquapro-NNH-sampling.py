@@ -264,6 +264,14 @@ if __name__ == "__main__":
     seed_l = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
     print(f"Prob: {Prob}; r: {Dist_t}; seed list: {seed_l}")
 
+    save_path = f"results_NNH/RS/" + Fname + "_" + H1_op + f"_1006.txt"
+    Path(f"./results_NNH/RS/").mkdir(parents=True, exist_ok=True)
+    with open(
+        save_path,
+        "a",
+    ) as file:
+        file.write("seed\tsample size\tavg prop_S\tavg acc\tavg rejH0\tavg time\n")
+
     num_query = 1
     num_sample = 30
     fac_list = np.arange(0.5, 1.51, 0.05)
@@ -341,8 +349,6 @@ if __name__ == "__main__":
                     time_l.append(time_one_sample)
                     prop_S_l.append(prop_S)
 
-            Path(f"./results_NNH/RS/").mkdir(parents=True, exist_ok=True)
-
             backup_res = [
                 seed,
                 sample_size,
@@ -352,13 +358,9 @@ if __name__ == "__main__":
                 round(np.mean(time_l), 4),
             ]
             with open(
-                f"results_NNH/RS/" + Fname + "_" + H1_op + f"_1006.txt",
+                save_path,
                 "a",
             ) as file:
-                if seed == seed_l[0]:
-                    file.write(
-                        "seed\tc\tsample size\tavg prop_S\tavg acc\tavg rejH0\tavg time\n"
-                    )
                 results_str = "\t".join(map(str, backup_res)) + "\n"
                 file.write(results_str)
 
