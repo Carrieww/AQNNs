@@ -258,19 +258,14 @@ if __name__ == "__main__":
     Proxy_emb, Oracle_emb = load_data(name=Fname)
 
     # NN algo parameters
-    # Pt = Rt = 0.72
     Prob = 0.95
     Dist_t = 0.85
-    H1_op = "less"
-    seed = 3
-    print(f"Prob: {Prob}; r: {Dist_t}; seed: {seed}")
+    H1_op = "greater"
+    seed_l = [1, 2, 3, 4]
+    print(f"Prob: {Prob}; r: {Dist_t}; seed list: {seed_l}")
 
     num_query = 1
-    num_sample = 30
-    # sampling_method = "RNS"
-    np.random.seed(seed)
-    Index = np.random.choice(range(len(Oracle_emb)), size=num_query, replace=False)
-
+    num_sample = 5
     fac_list = np.arange(0.8, 1.25, 5)
     fac_list = [round(num, 4) for num in fac_list]
 
@@ -283,165 +278,81 @@ if __name__ == "__main__":
         sample_size_list = list(range(1000, 4001, 1000))
     res = defaultdict(list)
 
-    Proxy_dist, Oracle_dist = preprocess_dist(
-        Oracle_emb, Proxy_emb, Oracle_emb[[Index[0]]]
-    )
-    # Ranks = preprocess_ranks(Proxy_dist)
-    true_ans_D = np.where(Oracle_dist <= Dist_t)[0]
+    for seed in seed_l:
+        np.random.seed(seed)
+        Index = np.random.choice(range(len(Oracle_emb)), size=num_query, replace=False)
 
-    prop_D = len(true_ans_D) / Oracle_dist.shape[0]
-    print(f"the GT proportion is {(prop_D)}")
+        Proxy_dist, Oracle_dist = preprocess_dist(
+            Oracle_emb, Proxy_emb, Oracle_emb[[Index[0]]]
+        )
+        # Ranks = preprocess_ranks(Proxy_dist)
+        true_ans_D = np.where(Oracle_dist <= Dist_t)[0]
 
-    for sample_size in sample_size_list:
-        print(f"sample size: {sample_size}")
-        for cost in [
-            int(sample_size / 10),
-            int(sample_size / 5),
-            int(sample_size / 2),
-            sample_size,
-        ]:
-            for Pt in [0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95]:
-                rt_k_success = defaultdict(list)
-                rt_k_precision = defaultdict(list)
-                rt_k_recall = defaultdict(list)
-                rt_k_acc = defaultdict(list)
-                rt_k_rejH0 = defaultdict(list)
-                rt_response_time = defaultdict(list)
-                rt_prop = defaultdict(list)
-                rt_cost = defaultdict(list)
+        prop_D = len(true_ans_D) / Oracle_dist.shape[0]
+        print(f"the GT proportion is {(prop_D)}")
 
-                pt_k_success = defaultdict(list)
-                pt_k_recall = defaultdict(list)
-                pt_k_precision = defaultdict(list)
-                pt_k_acc = defaultdict(list)
-                pt_k_rejH0 = defaultdict(list)
-                pt_response_time = defaultdict(list)
-                pt_prop = defaultdict(list)
-                pt_cost = defaultdict(list)
-                print(f"Pt=Rt={Pt}")
-                Rt = Pt
-                for sample_ind in range(num_sample):
-                    one_sample_start = time.time()
+        for sample_size in sample_size_list:
+            print(f"sample size: {sample_size}")
+            acc_l = defaultdict(list)
+            rejH0_l = defaultdict(list)
+            time_l = defaultdict(list)
+            for sample_ind in range(num_sample):
+                one_sample_start = time.time()
 
-                    indices = np.random.choice(
-                        Oracle_dist.shape[0], sample_size, replace=False
-                    )
-                    oracle_dist_S = Oracle_dist[indices]
-                    proxy_dist_S = Proxy_dist[indices]
-                    # ranks_S = preprocess_ranks(proxy_dist_S)
-                    S_size = oracle_dist_S.shape[0]
+                indices = np.random.choice(
+                    Oracle_dist.shape[0], sample_size, replace=False
+                )
+                oracle_dist_S = Oracle_dist[indices]
+                proxy_dist_S = Proxy_dist[indices]
+                # ranks_S = preprocess_ranks(proxy_dist_S)
+                S_size = oracle_dist_S.shape[0]
 
-                    true_ans_S = np.where(oracle_dist_S <= Dist_t)[0]
-                    print(
-                        f"prop_S at {sample_ind}-th sample is: ",
-                        true_ans_S.shape[0] / S_size,
-                    )
-                    time_one_sample = time.time() - one_sample_start
+                true_ans_S = np.where(oracle_dist_S <= Dist_t)[0]
+                print(
+                    f"prop_S at {sample_ind}-th sample is: ",
+                    true_ans_S.shape[0] / S_size,
+                )
+                time_one_sample = time.time() - one_sample_start
 
-                    # PQE-PT
-                    PT_start = time.time()
-                    PT_precision, PT_recall, PT_k_star, PT_ans = test_PQE_PT(
-                        oracle_dist_S, proxy_dist_S, bd=cost, t=Dist_t, prob=Prob, pt=Pt
-                    )
-                    PT_end = time.time()
-
-                    # PQE-RT
-                    RT_start = time.time()
-                    RT_precision, RT_recall, RT_k_star, RT_ans = test_PQE_RT(
-                        oracle_dist_S,
-                        proxy_dist_S,
-                        bd=cost,
-                        t=Dist_t,
-                        prob=Prob,
-                        rt=Rt,
-                    )
-                    RT_end = time.time()
-
-                    for fac in fac_list:
-                        c_time_GT = (len(true_ans_D) / Oracle_dist.shape[0]) * fac
-                        print(f">>> c is {c_time_GT}")
-                        _, _, GT = one_proportion_z_test(
-                            len(true_ans_D),
-                            Oracle_dist.shape[0],
-                            c_time_GT,
-                            0.05,
-                            H1_op,
-                        )
-                        print(f"the ground truth to reject H0 result is : {GT}")
-                        rt_align, rt_reject = HT_acc(
-                            "PQE-RT",
-                            RT_ans,
-                            S_size,
-                            H1_op,
-                            GT,
-                            c_time_GT,
-                        )
-                        rt_k_acc[fac].append(rt_align)
-                        rt_k_rejH0[fac].append(rt_reject)
-                        rt_k_success[fac].append(int(RT_recall >= Rt))
-                        rt_k_recall[fac].append(RT_recall)
-                        rt_k_precision[fac].append(RT_precision)
-                        rt_response_time[fac].append(round(RT_end - RT_start, 4))
-                        rt_cost[fac].append(cost)
-                        rt_prop[fac].append(len(RT_ans) / S_size)
-
-                        pt_align, pt_reject = HT_acc(
-                            "PQE-PT",
-                            PT_ans,
-                            S_size,
-                            H1_op,
-                            GT,
-                            c_time_GT,
-                        )
-                        pt_k_acc[fac].append(pt_align)
-                        pt_k_rejH0[fac].append(pt_reject)
-                        pt_k_success[fac].append(int(PT_recall >= Pt))
-                        pt_k_recall[fac].append(PT_recall)
-                        pt_k_precision[fac].append(PT_precision)
-                        pt_response_time[fac].append(round(PT_end - PT_start, 4))
-                        pt_cost[fac].append(cost)
-                        pt_prop[fac].append(len(PT_ans) / S_size)
-
-                Path(f"./results_NNH/PQE/").mkdir(parents=True, exist_ok=True)
-                # print("final result is:")
                 for fac in fac_list:
-                    backup_res = [
-                        Pt,
-                        fac,
-                        sample_size,
-                        round(sum(pt_k_recall[fac]) / len(pt_k_recall[fac]), 4),
-                        round(sum(pt_k_precision[fac]) / len(pt_k_precision[fac]), 4),
-                        round(sum(pt_k_success[fac]) / len(pt_k_success[fac]), 4),
-                        round(sum(pt_k_acc[fac]) / len(pt_k_acc[fac]), 4),
-                        round(sum(pt_k_rejH0[fac]) / len(pt_k_rejH0[fac]), 4),
-                        round(
-                            sum(pt_response_time[fac]) / len(pt_response_time[fac]), 4
-                        ),
-                        round(sum(pt_prop[fac]) / len(pt_prop[fac]), 4),
-                        round(sum(pt_cost[fac]) / len(pt_cost[fac]), 4),
-                        round(sum(rt_k_recall[fac]) / len(rt_k_recall[fac]), 4),
-                        round(sum(rt_k_precision[fac]) / len(rt_k_precision[fac]), 4),
-                        round(sum(rt_k_success[fac]) / len(rt_k_success[fac]), 4),
-                        round(sum(rt_k_acc[fac]) / len(rt_k_acc[fac]), 4),
-                        round(sum(rt_k_rejH0[fac]) / len(rt_k_rejH0[fac]), 4),
-                        round(
-                            sum(rt_response_time[fac]) / len(rt_response_time[fac]), 4
-                        ),
-                        round(sum(rt_prop[fac]) / len(rt_prop[fac]), 4),
-                        round(sum(rt_cost[fac]) / len(rt_cost[fac]), 4),
-                    ]
-                    with open(
-                        f"results_NNH/PQE/"
-                        + Fname
-                        + "_"
-                        + H1_op
-                        + f"_query{str(seed)}_0921_30.txt",
-                        "a",
-                    ) as file:
-                        results_str = "\t".join(map(str, backup_res)) + "\n"
-                        file.write(results_str)
-                    # results_str = "\t".join(map(str, backup_res)) + "\n"
-                    # print(results_str)
+                    c_time_GT = (len(true_ans_D) / Oracle_dist.shape[0]) * fac
+                    print(f">>> c is {c_time_GT}")
+                    _, _, GT = one_proportion_z_test(
+                        len(true_ans_D),
+                        Oracle_dist.shape[0],
+                        c_time_GT,
+                        0.05,
+                        H1_op,
+                    )
+                    print(f"the ground truth to reject H0 result is : {GT}")
+                    align, reject = HT_acc(
+                        "RNS",
+                        true_ans_S,
+                        S_size,
+                        H1_op,
+                        GT,
+                        c_time_GT,
+                    )
+                    acc_l[fac].append(align)
+                    rejH0_l[fac].append(reject)
+                    time_l[fac].append(time_one_sample)
+
+            Path(f"./results_NNH/RS/").mkdir(parents=True, exist_ok=True)
+            for fac in fac_list:
+                backup_res = [
+                    seed,
+                    fac,
+                    sample_size,
+                    round(sum(acc_l[fac]) / len(acc_l[fac]), 4),
+                    round(sum(rejH0_l[fac]) / len(rejH0_l[fac]), 4),
+                    round(sum(time_l[fac]) / len(time_l[fac]), 4),
+                ]
+                with open(
+                    f"results_NNH/RN/" + Fname + "_" + H1_op + f"_0926_30.txt",
+                    "a",
+                ) as file:
+                    results_str = "\t".join(map(str, backup_res)) + "\n"
+                    file.write(results_str)
 
     end_time = time.time()
     print("execution time is %.2fs" % (end_time - start_time))
