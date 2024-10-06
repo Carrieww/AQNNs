@@ -306,8 +306,9 @@ if __name__ == "__main__":
     Prob = 0.95
     Dist_t = 0.85
     H1_op = "greater"
+    version = "version3"
     print(f"Prob: {Prob}; r: {Dist_t}")
-    fac_list = np.arange(0.5, 1.5, 0.05)
+    fac_list = np.arange(0.5, 1.51, 0.05)
     fac_list = [round(num, 4) for num in fac_list]
 
     num_query = 1
@@ -324,7 +325,7 @@ if __name__ == "__main__":
         prop_D = len(true_ans_D) / Oracle_dist.shape[0]
         print(f"the GT proportion is {(prop_D)}")
 
-        total_cost = 2000
+        total_cost = 500
         cost_step_size = 10
         indices = np.random.choice(Oracle_dist.shape[0], total_cost, replace=False)
         oracle_dist_S = Oracle_dist[indices]
@@ -359,6 +360,29 @@ if __name__ == "__main__":
             find_cost_r_list.append(RT_recall)
             find_cost_p_list.append(RT_precision)
             find_cost_cost_list.append(cost)
+            acc_list = []
+            for fac in fac_list:
+                c_time_GT = (len(true_ans_D) / Oracle_dist.shape[0]) * fac
+                print(f">>> c is {c_time_GT}")
+                _, _, GT = one_proportion_z_test(
+                    len(true_ans_D),
+                    Oracle_dist.shape[0],
+                    c_time_GT,
+                    0.05,
+                    H1_op,
+                )
+                print(f"the ground truth to reject H0 result is : {GT}")
+                rt_align, rt_reject = HT_acc(
+                    "PQE-RT",
+                    RT_ans,
+                    oracle_dist_S.shape[0],
+                    H1_op,
+                    GT,
+                    c_time_GT,
+                )
+                acc_list.append(rt_align)
+            find_cost_acc_list.append(round(np.mean(acc_list), 4))
+
             cost += cost_step_size
             find_cost_flag = False
             while cost < total_cost:
@@ -414,7 +438,7 @@ if __name__ == "__main__":
             + Fname
             + "_"
             + H1_op
-            + f"_1006_version2_costData.txt"
+            + f"_1006_{version}_costData.txt"
         )
         with open(
             file_name1,
@@ -443,7 +467,7 @@ if __name__ == "__main__":
             Prob,
         )
         file_name2 = (
-            f"results_NNH/PQE-better1/" + Fname + "_" + H1_op + f"_1006_version2.txt"
+            f"results_NNH/PQE-better1/" + Fname + "_" + H1_op + f"_1006_{version}.txt"
         )
         with open(file_name2, "a") as file:
             # Write the header (if it's not already present in the file)

@@ -261,17 +261,17 @@ if __name__ == "__main__":
     Prob = 0.95
     Dist_t = 0.85
     H1_op = "greater"
-    seed_l = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    seed_l = [1, 2, 3, 4]
     print(f"Prob: {Prob}; r: {Dist_t}; seed list: {seed_l}")
 
     num_query = 1
-    num_sample = 30
-    fac_list = np.arange(0.5, 1.51, 0.05)
+    num_sample = 5
+    fac_list = np.arange(0.8, 1.25, 5)
     fac_list = [round(num, 4) for num in fac_list]
 
     if Fname == "icd9_eICU":
         # sample_size_list = [8000,8100,8200,8236]
-        sample_size_list = list(range(200, 2010, 200))
+        sample_size_list = [200, 400, 600, 800, 1000]
         # sample_size_list = list(range(500, 4001, 500))
     elif Fname == "icd9_mimic":
         # sample_size_list = [4000,4100,4200,4244]
@@ -293,11 +293,9 @@ if __name__ == "__main__":
 
         for sample_size in sample_size_list:
             print(f"sample size: {sample_size}")
-            acc_l = []
-            rejH0_l = []
-            time_l = []
-            prop_S_l = []
-
+            acc_l = defaultdict(list)
+            rejH0_l = defaultdict(list)
+            time_l = defaultdict(list)
             for sample_ind in range(num_sample):
                 one_sample_start = time.time()
 
@@ -310,10 +308,9 @@ if __name__ == "__main__":
                 S_size = oracle_dist_S.shape[0]
 
                 true_ans_S = np.where(oracle_dist_S <= Dist_t)[0]
-                prop_S = round(true_ans_S.shape[0] / S_size, 4)
                 print(
                     f"prop_S at {sample_ind}-th sample is: ",
-                    prop_S,
+                    true_ans_S.shape[0] / S_size,
                 )
                 time_one_sample = time.time() - one_sample_start
 
@@ -336,31 +333,26 @@ if __name__ == "__main__":
                         GT,
                         c_time_GT,
                     )
-                    acc_l.append(align)
-                    rejH0_l.append(reject)
-                    time_l.append(time_one_sample)
-                    prop_S_l.append(prop_S)
+                    acc_l[fac].append(align)
+                    rejH0_l[fac].append(reject)
+                    time_l[fac].append(time_one_sample)
 
             Path(f"./results_NNH/RS/").mkdir(parents=True, exist_ok=True)
-
-            backup_res = [
-                seed,
-                sample_size,
-                round(np.mean(prop_S_l), 4),
-                round(np.mean(acc_l), 4),
-                round(np.mean(rejH0_l), 4),
-                round(np.mean(time_l), 4),
-            ]
-            with open(
-                f"results_NNH/RS/" + Fname + "_" + H1_op + f"_1006.txt",
-                "a",
-            ) as file:
-                if seed == seed_l[0]:
-                    file.write(
-                        "seed\tc\tsample size\tavg prop_S\tavg acc\tavg rejH0\tavg time\n"
-                    )
-                results_str = "\t".join(map(str, backup_res)) + "\n"
-                file.write(results_str)
+            for fac in fac_list:
+                backup_res = [
+                    seed,
+                    fac,
+                    sample_size,
+                    round(sum(acc_l[fac]) / len(acc_l[fac]), 4),
+                    round(sum(rejH0_l[fac]) / len(rejH0_l[fac]), 4),
+                    round(sum(time_l[fac]) / len(time_l[fac]), 4),
+                ]
+                with open(
+                    f"results_NNH/RN/" + Fname + "_" + H1_op + f"_0926_30.txt",
+                    "a",
+                ) as file:
+                    results_str = "\t".join(map(str, backup_res)) + "\n"
+                    file.write(results_str)
 
     end_time = time.time()
     print("execution time is %.2fs" % (end_time - start_time))
