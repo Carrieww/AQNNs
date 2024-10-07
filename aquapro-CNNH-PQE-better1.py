@@ -1,6 +1,6 @@
 from math import floor, ceil
-from collections import defaultdict
-
+from scipy import stats
+import pickle
 from aquapro_util import (
     load_data,
     preprocess_dist,
@@ -15,8 +15,6 @@ from aquapro_util import (
 from numba import njit
 from hyper_parameter import std_offset
 import numpy as np
-
-# import pickle
 from pathlib import Path
 
 import time
@@ -235,6 +233,87 @@ def one_proportion_z_test(
     return z_stat, p_value, reject
 
 
+def get_data(filename=None, is_text=False):
+    if is_text:
+        instance_list = (np.loadtxt(filename) >= 0).astype(int)
+    else:
+        instance_list = pickle.load(open(filename, "rb"), encoding="latin1")
+
+    return instance_list
+
+
+def is_int(string):
+    try:
+        int(string)
+        return True
+    except ValueError:
+        return False
+
+
+def agg_value(D, ind_list, attr_id, agg):
+    l = []
+    for ans_id in ind_list:
+        value = D[ans_id][2][attr_id]
+        if is_int(value):
+            value = int(value)
+            if not np.isnan(value):
+                l.append(int(value))
+        else:
+            pass
+
+    if agg == "mean":
+        res = sum(l) / len(l)
+    else:
+        raise Exception(f"The case for {agg} has not been implemented yet")
+    return l, res
+
+
+def one_sample_t_test(l, c, alpha=0.05, alternative="two-sided"):
+    global rejectH0
+    t_stat, p_value = stats.ttest_1samp(l, popmean=c, alternative=alternative)
+    CI_lower, CI_upper = stats.t.interval(
+        confidence=1 - alpha,
+        df=len(l) - 1,
+        loc=np.mean(l),
+        scale=stats.sem(l),
+    )
+
+    if p_value < alpha:
+        rejectH0 = True
+        print(
+            f"The test (c = {c}, op = {alternative}) is significant, we shall reject the null hypothesis."
+        )
+    elif p_value >= alpha:
+        rejectH0 = False
+        print(
+            f"The test (c = {c}, op = {alternative}) is NOT significant, we shall accept the null hypothesis."
+        )
+    print(f"confidence interval is ({round(CI_lower,4), round(CI_upper,4)})")
+    return t_stat, p_value, rejectH0, CI_lower, CI_upper
+
+
+def HT_acc_t_test(l, c, operator, GT=None, is_D=False):
+    t_stat, p_value, rejectH0, CI_l, CI_h = one_sample_t_test(
+        l, c, alternative=operator
+    )
+
+    print("T-Statistic:", t_stat)
+    print("P-Value:", p_value)
+
+    if is_D:
+        align = True
+        print(f"The ans in D to reject H0 result is : {rejectH0}")
+        print("align with ground truth?", align)
+
+    else:
+        print(f"The ans to reject H0 result is : {rejectH0}")
+        assert GT is not None, "GT is None"
+        align = rejectH0 == GT
+        print("align with ground truth?", align)
+
+    return align, rejectH0, CI_l, CI_h
+
+
 def PQE_better(
     num_sample,
     Oracle_dist,
@@ -247,14 +326,23 @@ def PQE_better(
     Prob,
     seed,
 ):
+    HypothesisType = "CNNH"
     acc_list = []
     recall_l = []
     precision_l = []
+    if HypothesisType == "NNH":
+        prop_list = []
+
+    elif HypothesisType == "CNNH":
+        agg_l = []
+        CI_l_l = []
+        CI_h_l = []
+
     for i in range(num_sample):
         np.random.seed(seed * i)
-        indices = np.random.choice(Oracle_dist.shape[0], total_cost, replace=False)
-        oracle_dist_S = Oracle_dist[indices]
-        proxy_dist_S = Proxy_dist[indices]
+        # indices = np.random.choice(Oracle_dist.shape[0], total_cost, replace=False)
+        # oracle_dist_S = Oracle_dist[indices]
+        # proxy_dist_S = Proxy_dist[indices]
         RT_precision, RT_recall, _, RT_ans = test_PQE_RT(
             oracle_dist_S,
             proxy_dist_S,
@@ -266,53 +354,88 @@ def PQE_better(
         print(f"recall: {RT_recall}, prcision: {RT_precision}, at cost {cost}")
         recall_l.append(RT_recall)
         precision_l.append(RT_precision)
-        print(f"THE prop is {len(RT_ans)/proxy_dist_S.shape[0]}")
+
+        l_S, agg_S = agg_value(D_attr, RT_ans, attr_id, agg)
+        print(
+            f"The number of NN in S is {len(RT_ans)} ({len(RT_ans)/proxy_dist_S.shape[0]}%), the aggregated value is {agg_S}"
+        )
+        print(f"the prop is {len(RT_ans)/proxy_dist_S.shape[0]}")
 
         for fac in fac_list:
-            c_time_GT = (len(true_ans_D) / Oracle_dist.shape[0]) * fac
-            print(f">>> c is {c_time_GT}")
-            _, _, GT = one_proportion_z_test(
-                len(true_ans_D),
-                Oracle_dist.shape[0],
-                c_time_GT,
-                0.05,
-                H1_op,
-            )
-            print(f"the ground truth to reject H0 result is : {GT}")
-            rt_align, rt_reject = HT_acc(
-                "PQE-RT",
-                RT_ans,
-                oracle_dist_S.shape[0],
-                H1_op,
-                GT,
-                c_time_GT,
-            )
-            acc_list.append(rt_align)
+            if HypothesisType == "NNH":
+                c_time_GT = (len(true_ans_D) / Oracle_dist.shape[0]) * fac
+                print(f">>> c is {c_time_GT}")
+                _, _, GT = one_proportion_z_test(
+                    len(true_ans_D),
+                    Oracle_dist.shape[0],
+                    c_time_GT,
+                    0.05,
+                    H1_op,
+                )
+                print(f"the ground truth to reject H0 result is : {GT}")
+                rt_align, rt_reject = HT_acc(
+                    "PQE-RT",
+                    RT_ans,
+                    oracle_dist_S.shape[0],
+                    H1_op,
+                    GT,
+                    c_time_GT,
+                )
+                acc_list.append(rt_align)
+            elif HypothesisType == "CNNH":
+                c_time_GT = true_ans_D[1] * fac
+                print(f">>> c is {c_time_GT}")
+
+                _, GT, GT_CI_l, GT_CI_h = HT_acc_t_test(
+                    true_ans_D[0], c_time_GT, H1_op, is_D=True
+                )
+
+                print(f"the ground truth to reject H0 result is : {GT}")
+                rt_align, rt_reject, rt_CI_l, rt_CI_h = HT_acc_t_test(
+                    l_S, c_time_GT, H1_op, GT=GT, is_D=False
+                )
+                acc_list.append(rt_align)
+                agg_l.append(agg_S)
+                CI_l_l.append(rt_CI_l)
+                CI_h_l.append(rt_CI_h)
 
     avg_acc = np.mean(acc_list)
     avg_recall = np.mean(recall_l)
     avg_precision = np.mean(precision_l)
+    avg_agg = np.mean(agg_l)
+    avg_CI_l = np.mean(CI_l_l)
+    avg_CI_h = np.mean(CI_h_l)
     print(f"the average accuracy over {num_sample} runs and {fac_list} is {avg_acc}")
     print(f"the average recall over {num_sample} is {avg_recall}")
     print(f"the average precision over {num_sample} is {avg_precision}")
+    print(f"the average aggregate value over {num_sample} is {avg_agg}")
+    print(f"the average lower CI value over {num_sample} is {avg_CI_l}")
+    print(f"the average upper CI value over {num_sample} is {avg_CI_h}")
 
-    return avg_acc, avg_recall, avg_precision
+    return avg_acc, avg_recall, avg_precision, avg_agg, avg_CI_l, avg_CI_h
 
 
 if __name__ == "__main__":
     start_time = time.time()
     Fname = "icd9_eICU"
-    Path(f"./results_NNH/PQE-better1/").mkdir(parents=True, exist_ok=True)
+    Path(f"./results_CNNH/PQE-better1/").mkdir(parents=True, exist_ok=True)
     Proxy_emb, Oracle_emb = load_data(name=Fname)
 
     # NN algo parameters
     Prob = 0.95
     Dist_t = 0.85
-    H1_op = "less"
-    version = "version1"
-    print(f"Prob: {Prob}; r: {Dist_t}")
+    H1_op = "greater"
+    version = "version2"
     fac_list = np.arange(0.5, 1.51, 0.05)
     fac_list = [round(num, 4) for num in fac_list]
+
+    D_attr = get_data(filename="data/eICU_new/" + Fname + ".testfull")
+    agg = "mean"
+    attr = "age"
+    attr_id = 1
+    subject = "of NNs of q"
+    print(f"Prob: {Prob}; r: {Dist_t}")
+    print(f"H1: {agg} {attr} {subject} is {H1_op}")
 
     num_query = 1
     num_sample = 30
@@ -325,10 +448,14 @@ if __name__ == "__main__":
             Oracle_emb, Proxy_emb, Oracle_emb[[Index[0]]]
         )
         true_ans_D = np.where(Oracle_dist <= Dist_t)[0]
-        prop_D = len(true_ans_D) / Oracle_dist.shape[0]
-        print(f"the GT proportion is {(prop_D)}")
+        l_D, agg_D = agg_value(D_attr, true_ans_D, attr_id, agg)
 
-        total_cost = 600
+        _, agg_D_full = agg_value(D_attr, range(len(D_attr)), attr_id, agg)
+        print(
+            f"The number of NN in D is {len(true_ans_D)} ({len(true_ans_D)/Proxy_dist.shape[0]}%), the GT aggregated value of NN is {agg_D} and the aggregated value in D is {agg_D_full}"
+        )
+
+        total_cost = 1000
         cost_step_size = 10
         indices = np.random.choice(Oracle_dist.shape[0], total_cost, replace=False)
         oracle_dist_S = Oracle_dist[indices]
@@ -432,6 +559,7 @@ if __name__ == "__main__":
                     optimal_cost = cost
                 else:
                     cost += cost_step_size
+
         if find_cost_flag:
             pass
         else:
@@ -441,32 +569,33 @@ if __name__ == "__main__":
             f"At recall target={recall_target}; we find optimal cost={optimal_cost} which achieves recall {RT_recall}, precision {RT_precision}, and HT accuracy {round(np.mean(acc_list), 4)}"
         )
         find_cost_time = round(time.time() - find_cost_start, 4)
-        file_name1 = (
-            f"results_NNH/PQE-better1/"
-            + Fname
-            + "_"
-            + H1_op
-            + f"_1007_{version}_costData.txt"
-        )
-        with open(
-            file_name1,
-            "a",
-        ) as file:
-            file.write(f">>> seed {seed}\n")
-            cost_str = "cost" + "\t" + "\t".join(map(str, find_cost_cost_list)) + "\n"
-            file.write(cost_str)
-            r_str = "recall" + "\t" + "\t".join(map(str, find_cost_r_list)) + "\n"
-            file.write(r_str)
-            p_str = "precision" + "\t" + "\t".join(map(str, find_cost_p_list)) + "\n"
-            file.write(p_str)
-            acc_str = "accuracy" + "\t" + "\t".join(map(str, find_cost_acc_list)) + "\n"
-            file.write(acc_str)
-            file.write("time" + "\t" + str(find_cost_time) + "\n\n")
 
-        avg_acc, avg_recall, avg_precision = PQE_better(
+        # file_name1 = (
+        #     f"results_CNNH/PQE-better1/"
+        #     + Fname
+        #     + "_"
+        #     + H1_op
+        #     + f"_1007_{version}_costData.txt"
+        # )
+        # with open(
+        #     file_name1,
+        #     "a",
+        # ) as file:
+        #     file.write(f">>> seed {seed}\n")
+        #     cost_str = "cost" + "\t" + "\t".join(map(str, find_cost_cost_list)) + "\n"
+        #     file.write(cost_str)
+        #     r_str = "recall" + "\t" + "\t".join(map(str, find_cost_r_list)) + "\n"
+        #     file.write(r_str)
+        #     p_str = "precision" + "\t" + "\t".join(map(str, find_cost_p_list)) + "\n"
+        #     file.write(p_str)
+        #     acc_str = "accuracy" + "\t" + "\t".join(map(str, find_cost_acc_list)) + "\n"
+        #     file.write(acc_str)
+        #     file.write("time" + "\t" + str(find_cost_time) + "\n\n")
+
+        avg_acc, avg_recall, avg_precision, avg_agg, avg_CI_l, avg_CI_h = PQE_better(
             num_sample,
             Oracle_dist,
-            true_ans_D,
+            [l_D, agg_D],
             oracle_dist_S,
             proxy_dist_S,
             optimal_cost,
@@ -476,7 +605,7 @@ if __name__ == "__main__":
             seed,
         )
         file_name2 = (
-            f"results_NNH/PQE-better1/" + Fname + "_" + H1_op + f"_1007_{version}.txt"
+            f"results_CNNH/PQE-better1/" + Fname + "_" + H1_op + f"_1007_{version}.txt"
         )
         with open(file_name2, "a") as file:
             # Write the header (if it's not already present in the file)
@@ -488,13 +617,13 @@ if __name__ == "__main__":
             # Write the data for the current seed
             file.write(
                 f"seed = {seed:.4f}\t{optimal_cost:.4f}\t{RT_recall:.4f}\t{RT_precision:.4f}\t"
-                f"{avg_acc:.4f}\t{avg_recall:.4f}\t{avg_precision:.4f}\t{prop_D:.4f}\n"
+                f"{avg_acc:.4f}\t{avg_recall:.4f}\t{avg_precision:.4f}\t{avg_agg:.4f}\t{avg_CI_l:.4f}\t{avg_CI_h:.4f}\n"
             )
         print(
             f"At recall target={recall_target}; we find optimal cost={optimal_cost} which achieves recall {RT_recall} and precision {RT_precision}"
         )
         print(
-            f"avg acc: {avg_acc}, avg recall: {avg_recall}, avg precision: {avg_precision}"
+            f"avg acc: {avg_acc}, avg recall: {avg_recall}, avg precision: {avg_precision}, avg agg value: {avg_agg}, avg lower CI: {avg_CI_l}, avg higher CI: {avg_CI_h}"
         )
         end_time = time.time()
         print("execution time is %.2fs" % (end_time - start_time))
