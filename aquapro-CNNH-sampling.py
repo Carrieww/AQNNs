@@ -335,8 +335,8 @@ if __name__ == "__main__":
     # NN algo parameters
     Prob = 0.95
     Dist_t = 0.85
-    H1_op = "greater"
-    seed_l = [1, 2]
+    H1_op = "less"
+    seed_l = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
     print(f"Prob: {Prob}; r: {Dist_t}; seed list: {seed_l}")
 
     save_path = f"results_CNNH/RS/" + Fname + "_" + H1_op + f"_1006.txt"
@@ -359,12 +359,12 @@ if __name__ == "__main__":
 
     num_query = 1
     num_sample = 30
-    fac_list = np.arange(0.5, 0.61, 0.05)
+    fac_list = np.arange(0.5, 1.51, 0.05)
     fac_list = [round(num, 4) for num in fac_list]
 
     if Fname == "icd9_eICU":
         # sample_size_list = [8000,8100,8200,8236]
-        sample_size_list = list(range(200, 510, 200))
+        sample_size_list = list(range(200, 2010, 200))
         # sample_size_list = list(range(500, 4001, 500))
     elif Fname == "icd9_mimic":
         # sample_size_list = [4000,4100,4200,4244]
@@ -396,6 +396,7 @@ if __name__ == "__main__":
             CI_h_S_l = []
 
             for sample_ind in range(num_sample):
+                np.random.seed(seed * sample_ind)
                 one_sample_start = time.time()
 
                 indices = np.random.choice(
@@ -415,7 +416,7 @@ if __name__ == "__main__":
                 time_one_sample = time.time() - one_sample_start
 
                 for fac in fac_list:
-                    c_time_GT = (len(true_ans_D) / Oracle_dist.shape[0]) * fac
+                    c_time_GT = agg_D * fac
                     print(f">>> c is {c_time_GT}")
 
                     _, GT, GT_CI_l, GT_CI_h = HT_acc_t_test(

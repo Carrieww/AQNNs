@@ -245,15 +245,17 @@ def PQE_better(
     recall_target,
     Dist_t,
     Prob,
+    seed,
 ):
     acc_list = []
     recall_l = []
     precision_l = []
     for i in range(num_sample):
-        # indices = np.random.choice(Oracle_dist.shape[0], total_cost, replace=False)
-        # oracle_dist_S = Oracle_dist[indices]
-        # proxy_dist_S = Proxy_dist[indices]
-        RT_precision, RT_recall, RT_k_star, RT_ans = test_PQE_RT(
+        np.random.seed(seed * i)
+        indices = np.random.choice(Oracle_dist.shape[0], total_cost, replace=False)
+        oracle_dist_S = Oracle_dist[indices]
+        proxy_dist_S = Proxy_dist[indices]
+        RT_precision, RT_recall, _, RT_ans = test_PQE_RT(
             oracle_dist_S,
             proxy_dist_S,
             bd=cost,
@@ -264,6 +266,7 @@ def PQE_better(
         print(f"recall: {RT_recall}, prcision: {RT_precision}, at cost {cost}")
         recall_l.append(RT_recall)
         precision_l.append(RT_precision)
+        print(f"THE prop is {len(RT_ans)/proxy_dist_S.shape[0]}")
 
         for fac in fac_list:
             c_time_GT = (len(true_ans_D) / Oracle_dist.shape[0]) * fac
@@ -305,8 +308,8 @@ if __name__ == "__main__":
     # NN algo parameters
     Prob = 0.95
     Dist_t = 0.85
-    H1_op = "greater"
-    version = "version3"
+    H1_op = "less"
+    version = "version1"
     print(f"Prob: {Prob}; r: {Dist_t}")
     fac_list = np.arange(0.5, 1.51, 0.05)
     fac_list = [round(num, 4) for num in fac_list]
@@ -325,7 +328,7 @@ if __name__ == "__main__":
         prop_D = len(true_ans_D) / Oracle_dist.shape[0]
         print(f"the GT proportion is {(prop_D)}")
 
-        total_cost = 500
+        total_cost = 600
         cost_step_size = 10
         indices = np.random.choice(Oracle_dist.shape[0], total_cost, replace=False)
         oracle_dist_S = Oracle_dist[indices]
@@ -355,7 +358,7 @@ if __name__ == "__main__":
         find_cost_acc_list = []
         if RT_precision > precision_target:
             print("skip finding cost")
-            pass
+            optimal_cost = cost
         else:
             find_cost_r_list.append(RT_recall)
             find_cost_p_list.append(RT_precision)
@@ -385,7 +388,7 @@ if __name__ == "__main__":
 
             cost += cost_step_size
             find_cost_flag = False
-            while cost < total_cost:
+            while cost <= total_cost:
                 print(f"cost={cost}")
                 RT_precision, RT_recall, RT_k_star, RT_ans = test_PQE_RT(
                     oracle_dist_S,
@@ -424,11 +427,16 @@ if __name__ == "__main__":
                 find_cost_acc_list.append(round(np.mean(acc_list), 4))
 
                 if RT_precision > precision_target and find_cost_flag == False:
+                    print("FOUND OPTIMAL COST!")
                     find_cost_flag = True
                     optimal_cost = cost
-                    pass
                 else:
                     cost += cost_step_size
+        if find_cost_flag:
+            pass
+        else:
+            print("DO NOT FIND OPTIMAL COST!")
+
         print(
             f"At recall target={recall_target}; we find optimal cost={optimal_cost} which achieves recall {RT_recall}, precision {RT_precision}, and HT accuracy {round(np.mean(acc_list), 4)}"
         )
@@ -438,7 +446,7 @@ if __name__ == "__main__":
             + Fname
             + "_"
             + H1_op
-            + f"_1006_{version}_costData.txt"
+            + f"_1007_{version}_costData.txt"
         )
         with open(
             file_name1,
@@ -465,9 +473,10 @@ if __name__ == "__main__":
             recall_target,
             Dist_t,
             Prob,
+            seed,
         )
         file_name2 = (
-            f"results_NNH/PQE-better1/" + Fname + "_" + H1_op + f"_1006_{version}.txt"
+            f"results_NNH/PQE-better1/" + Fname + "_" + H1_op + f"_1007_{version}.txt"
         )
         with open(file_name2, "a") as file:
             # Write the header (if it's not already present in the file)

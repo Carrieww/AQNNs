@@ -264,7 +264,7 @@ if __name__ == "__main__":
     seed_l = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
     print(f"Prob: {Prob}; r: {Dist_t}; seed list: {seed_l}")
 
-    save_path = f"results_NNH/RS/" + Fname + "_" + H1_op + f"_1006.txt"
+    save_path = f"results_NNH/RS/" + Fname + "_" + H1_op + f"_1007.txt"
     Path(f"./results_NNH/RS/").mkdir(parents=True, exist_ok=True)
     with open(
         save_path,
@@ -307,6 +307,7 @@ if __name__ == "__main__":
             prop_S_l = []
 
             for sample_ind in range(num_sample):
+                np.random.seed(seed * sample_ind)
                 one_sample_start = time.time()
 
                 indices = np.random.choice(
