@@ -252,9 +252,9 @@ def PQE_better(
     precision_l = []
     for i in range(num_sample):
         np.random.seed(seed * i)
-        # indices = np.random.choice(Oracle_dist.shape[0], total_cost, replace=False)
-        # oracle_dist_S = Oracle_dist[indices]
-        # proxy_dist_S = Proxy_dist[indices]
+        indices = np.random.choice(Oracle_dist.shape[0], total_cost, replace=False)
+        oracle_dist_S = Oracle_dist[indices]
+        proxy_dist_S = Proxy_dist[indices]
         RT_precision, RT_recall, _, RT_ans = test_PQE_RT(
             oracle_dist_S,
             proxy_dist_S,
