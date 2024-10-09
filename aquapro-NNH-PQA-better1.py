@@ -226,15 +226,16 @@ if __name__ == "__main__":
     # NN algo parameters
     Prob = 0.95
     Dist_t = 0.85
-    H1_op = "greater"
-    for seed in [1, 2, 3, 4]:
+    H1_op = "less"
+    seed_l = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    for seed in seed_l:
         print(f"Prob: {Prob}; r: {Dist_t}; seed: {seed}")
 
         num_query = 1
         np.random.seed(seed)
         Index = np.random.choice(range(len(Oracle)), size=num_query, replace=False)
 
-        fac_list = np.arange(0.8, 1.25, 0.05)
+        fac_list = np.arange(0.5, 1.51, 0.05)
         fac_list = [round(num, 4) for num in fac_list]
 
         # res = defaultdict(list)
@@ -243,14 +244,6 @@ if __name__ == "__main__":
         sync_Oracle = preprocess_sync(Proxy_dist, norm_scale)
         true_ans_D = np.where(sync_Oracle <= Dist_t)[0]
         print(f"the GT proportion is {(len(true_ans_D) / Oracle.shape[0])}")
-
-        rt_k_precision = defaultdict(list)
-        rt_k_recall = defaultdict(list)
-        rt_k_acc = defaultdict(list)
-        rt_k_rejH0 = defaultdict(list)
-        rt_response_time = defaultdict(list)
-        rt_prop = defaultdict(list)
-        rt_cost = defaultdict(list)
 
         # PQA-RT-sync
         RT_start = time.time()
@@ -287,6 +280,13 @@ if __name__ == "__main__":
         recall = true_pos / len(true_ans_D)
         response_time = round(time.time() - RT_start, 2)
 
+        rt_k_precision = []
+        rt_k_recall = []
+        rt_k_acc = []
+        rt_k_rejH0 = []
+        rt_response_time = []
+        rt_prop = []
+        rt_cost = []
         for fac in fac_list:
             c_time_GT = (len(true_ans_D) / sync_Oracle.shape[0]) * fac
             print(f"H1: % NN w.r.t {Index} is {H1_op} {c_time_GT}")
@@ -294,7 +294,7 @@ if __name__ == "__main__":
                 len(true_ans_D), sync_Oracle.shape[0], c_time_GT, 0.05, H1_op
             )
             print(f"the ground truth to reject H0 result is : {GT}")
-            align, reject = HT_acc(
+            RT_align, RT_reject = HT_acc(
                 "PQA-RT",
                 RT_ans,
                 sync_Oracle.shape[0],
@@ -302,40 +302,37 @@ if __name__ == "__main__":
                 GT,
                 prop_default=c_time_GT,
             )
-            rt_k_acc[fac].append(align)
-            rt_k_rejH0[fac].append(reject)
-            rt_k_precision[fac].append(precision)
-            rt_k_recall[fac].append(recall)
-            rt_cost[fac].append(len(oracle_call_set))
-            rt_response_time[fac].append(response_time)
-            rt_prop[fac].append(len(RT_ans) / sync_Oracle.shape[0])
+            rt_k_acc.append(RT_align)
+            rt_k_rejH0.append(RT_reject)
+            rt_k_precision.append(precision)
+            rt_k_recall.append(recall)
+            rt_cost.append(len(oracle_call_set))
+            rt_response_time.append(response_time)
+            rt_prop.append(len(RT_ans) / sync_Oracle.shape[0])
 
         print("================================")
 
         Path(f"./results_NNH/PQA-better1/").mkdir(parents=True, exist_ok=True)
-        for fac in fac_list:
-            backup_res = [
-                rt,
-                seed,
-                fac,
-                round(np.mean(rt_cost[fac]), 4),
-                round(np.mean(rt_k_recall[fac]), 4),
-                round(np.mean(rt_k_precision[fac]), 4),
-                round(np.mean(rt_k_acc[fac]), 4),
-                round(np.mean(rt_k_rejH0[fac]), 4),
-                round(np.mean(rt_response_time[fac]), 4),
-                round(np.mean(rt_prop[fac]), 4),
-            ]
-            with open(
-                f"results_NNH/PQA-better1/"
-                + Fname
-                + "_"
-                + H1_op
-                + f"_0927_version2.txt",
-                "a",
-            ) as file:
-                results_str = "\t".join(map(str, backup_res)) + "\n"
-                file.write(results_str)
+        backup_res = [
+            seed,
+            round(rt, 4),
+            round(np.mean(rt_cost), 4),
+            round(np.mean(rt_k_recall), 4),
+            round(np.mean(rt_k_precision), 4),
+            round(np.mean(rt_k_acc), 4),
+            round(np.mean(rt_response_time), 4),
+            round(np.mean(rt_prop), 4),
+        ]
+        with open(
+            f"results_NNH/PQA-better1/" + Fname + "_" + H1_op + f"_1008_version2.txt",
+            "a",
+        ) as file:
+            if seed == seed_l[0]:
+                file.write(
+                    "seed\trt\toptimal cost\tavg recall\tavg precision\tavg acc\tavg time\tapproximated prop\n"
+                )
+            results_str = "\t".join(map(str, backup_res)) + "\n"
+            file.write(results_str)
 
         # results_str = "\t".join(map(str, backup_res)) + "\n"
         # print(results_str)
