@@ -424,8 +424,8 @@ if __name__ == "__main__":
     # NN algo parameters
     Prob = 0.95
     Dist_t = 0.85
-    H1_op = "greater"
-    version = "version2"
+    H1_op = "less"
+    version = "version3"
     fac_list = np.arange(0.5, 1.51, 0.05)
     fac_list = [round(num, 4) for num in fac_list]
 
@@ -455,7 +455,7 @@ if __name__ == "__main__":
             f"The number of NN in D is {len(true_ans_D)} ({len(true_ans_D)/Proxy_dist.shape[0]}%), the GT aggregated value of NN is {agg_D} and the aggregated value in D is {agg_D_full}"
         )
 
-        total_cost = 1000
+        total_cost = 2000
         cost_step_size = 10
         indices = np.random.choice(Oracle_dist.shape[0], total_cost, replace=False)
         oracle_dist_S = Oracle_dist[indices]
@@ -605,25 +605,25 @@ if __name__ == "__main__":
             seed,
         )
         file_name2 = (
-            f"results_CNNH/PQE-better1/" + Fname + "_" + H1_op + f"_1007_{version}.txt"
+            f"results_CNNH/PQE-better1/" + Fname + "_" + H1_op + f"_1008_{version}.txt"
         )
         with open(file_name2, "a") as file:
             # Write the header (if it's not already present in the file)
             if seed == seed_l[0]:
                 file.write(
-                    "optimal cost\trecall achieved by find cost function\tprecision achieved by find cost function\tavg acc\tavg recall\tavg precision\tGT proportion\n"
+                    "optimal cost\trecall achieved by find cost function\tprecision achieved by find cost function\tavg acc\tavg recall\tavg precision\tavg aggregation\tavg lower CI\tavg higher CI\tagg_D\n"
                 )
 
             # Write the data for the current seed
             file.write(
                 f"seed = {seed:.4f}\t{optimal_cost:.4f}\t{RT_recall:.4f}\t{RT_precision:.4f}\t"
-                f"{avg_acc:.4f}\t{avg_recall:.4f}\t{avg_precision:.4f}\t{avg_agg:.4f}\t{avg_CI_l:.4f}\t{avg_CI_h:.4f}\n"
+                f"{avg_acc:.4f}\t{avg_recall:.4f}\t{avg_precision:.4f}\t{avg_agg:.4f}\t{avg_CI_l:.4f}\t{avg_CI_h:.4f}\t{agg_D:.4f}\n"
             )
         print(
             f"At recall target={recall_target}; we find optimal cost={optimal_cost} which achieves recall {RT_recall} and precision {RT_precision}"
         )
         print(
-            f"avg acc: {avg_acc}, avg recall: {avg_recall}, avg precision: {avg_precision}, avg agg value: {avg_agg}, avg lower CI: {avg_CI_l}, avg higher CI: {avg_CI_h}"
+            f"avg acc: {avg_acc}, avg recall: {avg_recall}, avg precision: {avg_precision}, avg agg value: {avg_agg}, avg lower CI: {avg_CI_l}, avg higher CI: {avg_CI_h}, GT agg_D: {agg_D}"
         )
         end_time = time.time()
         print("execution time is %.2fs" % (end_time - start_time))
