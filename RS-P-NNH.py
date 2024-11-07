@@ -165,6 +165,22 @@ def test_PQE_RT(oracle_dist, proxy_dist, bd, t=0.9, prob=0.9, rt=0.9):
 
     topk, phi = preprocess_topk_phi(proxy_dist, norm_scale=est_scale, t=t)
 
+    # # Step 3: Identify low-confidence points
+    # low_confidence_points = np.where(phi < 0.8)[0]
+
+    # # # Step 4: Sample from low-confidence points if enough points exist
+    # if len(low_confidence_points) >= bd:
+    #     samples = np.random.choice(low_confidence_points, size=bd, replace=False)
+    # else:
+    #     # If not enough low-confidence points, add some high-confidence points
+    #     high_confidence_points = np.where(phi >= 0.8)[0]
+    #     additional_samples = np.random.choice(
+    #         high_confidence_points, size=bd - len(low_confidence_points), replace=False
+    #     )
+    #     samples = np.concatenate([low_confidence_points, additional_samples])
+
+    # Step 5: Continue as usual with the precision and recall testing
+
     precision, recall, _, ans = test_PQA_RT(
         oracle_dist, phi, topk, t=t, prob=prob, rt=rt, pilots=samples
     )
@@ -235,88 +251,41 @@ def one_proportion_z_test(
     return z_stat, p_value, reject
 
 
-def PQE_better(
-    num_sample,
-    Oracle_dist,
-    true_ans_D,
-    oracle_dist_S,
-    proxy_dist_S,
-    cost,
-    recall_target,
-    Dist_t,
-    Prob,
-    seed,
-):
-    acc_list = []
-    recall_l = []
-    precision_l = []
-    for i in range(num_sample):
-        np.random.seed(seed * i)
-        # indices = np.random.choice(Oracle_dist.shape[0], total_cost, replace=False)
-        # oracle_dist_S = Oracle_dist[indices]
-        # proxy_dist_S = Proxy_dist[indices]
-        RT_precision, RT_recall, _, RT_ans = test_PQE_RT(
-            oracle_dist_S,
-            proxy_dist_S,
-            bd=cost,
-            t=Dist_t,
-            prob=Prob,
-            rt=recall_target,
-        )
-        print(f"recall: {RT_recall}, prcision: {RT_precision}, at cost {cost}")
-        recall_l.append(RT_recall)
-        precision_l.append(RT_precision)
-        print(f"THE prop is {len(RT_ans)/proxy_dist_S.shape[0]}")
-
-        for fac in fac_list:
-            c_time_GT = (len(true_ans_D) / Oracle_dist.shape[0]) * fac
-            print(f">>> c is {c_time_GT}")
-            _, _, GT = one_proportion_z_test(
-                len(true_ans_D),
-                Oracle_dist.shape[0],
-                c_time_GT,
-                0.05,
-                H1_op,
-            )
-            print(f"the ground truth to reject H0 result is : {GT}")
-            rt_align, rt_reject = HT_acc(
-                "PQE-RT",
-                RT_ans,
-                oracle_dist_S.shape[0],
-                H1_op,
-                GT,
-                c_time_GT,
-            )
-            acc_list.append(rt_align)
-
-    avg_acc = np.mean(acc_list)
-    avg_recall = np.mean(recall_l)
-    avg_precision = np.mean(precision_l)
-    print(f"the average accuracy over {num_sample} runs and {fac_list} is {avg_acc}")
-    print(f"the average recall over {num_sample} is {avg_recall}")
-    print(f"the average precision over {num_sample} is {avg_precision}")
-
-    return avg_acc, avg_recall, avg_precision
-
-
+# pre_compile()
 if __name__ == "__main__":
     start_time = time.time()
     Fname = "icd9_eICU"
-    Path(f"./results_NNH/PQE-better1/").mkdir(parents=True, exist_ok=True)
     Proxy_emb, Oracle_emb = load_data(name=Fname)
 
     # NN algo parameters
     Prob = 0.95
     Dist_t = 0.85
-    H1_op = "less"
-    version = "version1"
-    print(f"Prob: {Prob}; r: {Dist_t}")
-    fac_list = np.arange(0.5, 1.51, 0.05)
-    fac_list = [round(num, 4) for num in fac_list]
+    H1_op = "greater"
+    seed_l = [10]
+    print(f"Prob: {Prob}; r: {Dist_t}; seed list: {seed_l}")
+
+    save_path = f"results_NNH/RS/" + Fname + "_" + H1_op + f"_1007.txt"
+    Path(f"./results_NNH/RS/").mkdir(parents=True, exist_ok=True)
+    with open(
+        save_path,
+        "a",
+    ) as file:
+        file.write("seed\tsample size\tavg prop_S\tavg acc\tavg rejH0\tavg time\n")
 
     num_query = 1
     num_sample = 30
-    seed_l = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    fac_list = np.arange(0.5, 1.51, 0.05)
+    fac_list = [round(num, 4) for num in fac_list]
+
+    if Fname == "icd9_eICU":
+        # sample_size_list = [8000,8100,8200,8236]
+        sample_size_list = [900]
+        # sample_size_list = list(range(500, 4001, 500))
+    elif Fname == "icd9_mimic":
+        # sample_size_list = [4000,4100,4200,4244]
+        sample_size_list = list(range(1000, 4001, 1000))
+    res = defaultdict(list)
+
     for seed in seed_l:
         np.random.seed(seed)
         Index = np.random.choice(range(len(Oracle_emb)), size=num_query, replace=False)
@@ -324,86 +293,39 @@ if __name__ == "__main__":
         Proxy_dist, Oracle_dist = preprocess_dist(
             Oracle_emb, Proxy_emb, Oracle_emb[[Index[0]]]
         )
+        # Ranks = preprocess_ranks(Proxy_dist)
         true_ans_D = np.where(Oracle_dist <= Dist_t)[0]
+
         prop_D = len(true_ans_D) / Oracle_dist.shape[0]
         print(f"the GT proportion is {(prop_D)}")
 
-        total_cost = 600
-        cost_step_size = 10
-        indices = np.random.choice(Oracle_dist.shape[0], total_cost, replace=False)
-        oracle_dist_S = Oracle_dist[indices]
-        proxy_dist_S = Proxy_dist[indices]
+        for sample_size in sample_size_list:
+            print(f"sample size: {sample_size}")
+            acc_l = []
+            rejH0_l = []
+            time_l = []
+            prop_S_l = []
 
-        recall_target = 0.9
-        precision_target = 0.9
-        cost = 50
+            for sample_ind in range(num_sample):
+                np.random.seed(seed * sample_ind)
+                one_sample_start = time.time()
 
-        RT_precision, RT_recall, RT_k_star, RT_ans = test_PQE_RT(
-            oracle_dist_S,
-            proxy_dist_S,
-            bd=cost,
-            t=Dist_t,
-            prob=Prob,
-            rt=recall_target,
-        )
-
-        print(
-            f"At recall target={recall_target}, we achieve recall {RT_recall} and prcision: {RT_precision}"
-        )
-
-        find_cost_start = time.time()
-        find_cost_cost_list = []
-        find_cost_r_list = []
-        find_cost_p_list = []
-        find_cost_acc_list = []
-        if RT_precision > precision_target:
-            print("skip finding cost")
-            optimal_cost = cost
-        else:
-            find_cost_r_list.append(RT_recall)
-            find_cost_p_list.append(RT_precision)
-            find_cost_cost_list.append(cost)
-            acc_list = []
-            for fac in fac_list:
-                c_time_GT = (len(true_ans_D) / Oracle_dist.shape[0]) * fac
-                print(f">>> c is {c_time_GT}")
-                _, _, GT = one_proportion_z_test(
-                    len(true_ans_D),
-                    Oracle_dist.shape[0],
-                    c_time_GT,
-                    0.05,
-                    H1_op,
+                indices = np.random.choice(
+                    Oracle_dist.shape[0], sample_size, replace=False
                 )
-                print(f"the ground truth to reject H0 result is : {GT}")
-                rt_align, rt_reject = HT_acc(
-                    "PQE-RT",
-                    RT_ans,
-                    oracle_dist_S.shape[0],
-                    H1_op,
-                    GT,
-                    c_time_GT,
-                )
-                acc_list.append(rt_align)
-            find_cost_acc_list.append(round(np.mean(acc_list), 4))
+                oracle_dist_S = Oracle_dist[indices]
+                proxy_dist_S = Proxy_dist[indices]
+                # ranks_S = preprocess_ranks(proxy_dist_S)
+                S_size = oracle_dist_S.shape[0]
 
-            cost += cost_step_size
-            find_cost_flag = False
-            while cost <= total_cost:
-                print(f"cost={cost}")
-                RT_precision, RT_recall, RT_k_star, RT_ans = test_PQE_RT(
-                    oracle_dist_S,
-                    proxy_dist_S,
-                    bd=cost,
-                    t=Dist_t,
-                    prob=Prob,
-                    rt=recall_target,
+                true_ans_S = np.where(oracle_dist_S <= Dist_t)[0]
+                prop_S = round(true_ans_S.shape[0] / S_size, 4)
+                print(
+                    f"prop_S at {sample_ind}-th sample is: ",
+                    prop_S,
                 )
-                print(f"recall: {RT_recall}, prcision: {RT_precision}")
-                find_cost_r_list.append(round(RT_recall, 4))
-                find_cost_p_list.append(round(RT_precision, 4))
-                find_cost_cost_list.append(cost)
+                time_one_sample = time.time() - one_sample_start
 
-                acc_list = []
                 for fac in fac_list:
                     c_time_GT = (len(true_ans_D) / Oracle_dist.shape[0]) * fac
                     print(f">>> c is {c_time_GT}")
@@ -415,86 +337,35 @@ if __name__ == "__main__":
                         H1_op,
                     )
                     print(f"the ground truth to reject H0 result is : {GT}")
-                    rt_align, rt_reject = HT_acc(
-                        "PQE-RT",
-                        RT_ans,
-                        oracle_dist_S.shape[0],
+                    align, reject = HT_acc(
+                        "RNS",
+                        true_ans_S,
+                        S_size,
                         H1_op,
                         GT,
                         c_time_GT,
                     )
-                    acc_list.append(rt_align)
-                find_cost_acc_list.append(round(np.mean(acc_list), 4))
+                    acc_l.append(align)
+                    rejH0_l.append(reject)
+                    time_l.append(time_one_sample)
+                    prop_S_l.append(prop_S)
 
-                if RT_precision > precision_target and find_cost_flag == False:
-                    print("FOUND OPTIMAL COST!")
-                    find_cost_flag = True
-                    optimal_cost = cost
-                else:
-                    cost += cost_step_size
-        if find_cost_flag:
-            pass
-        else:
-            print("DO NOT FIND OPTIMAL COST!")
+            backup_res = [
+                seed,
+                sample_size,
+                round(np.mean(prop_S_l), 4),
+                round(np.mean(acc_l), 4),
+                round(np.mean(rejH0_l), 4),
+                round(np.mean(time_l), 4),
+            ]
+            # with open(
+            #     save_path,
+            #     "a",
+            # ) as file:
+            #     results_str = "\t".join(map(str, backup_res)) + "\n"
+            #     file.write(results_str)
+            results_str = "\t".join(map(str, backup_res)) + "\n"
+            print(results_str)
 
-        print(
-            f"At recall target={recall_target}; we find optimal cost={optimal_cost} which achieves recall {RT_recall}, precision {RT_precision}, and HT accuracy {round(np.mean(acc_list), 4)}"
-        )
-        find_cost_time = round(time.time() - find_cost_start, 4)
-        file_name1 = (
-            f"results_NNH/PQE-better1/"
-            + Fname
-            + "_"
-            + H1_op
-            + f"_1007_{version}_costData.txt"
-        )
-        with open(
-            file_name1,
-            "a",
-        ) as file:
-            file.write(f">>> seed {seed}\n")
-            cost_str = "cost" + "\t" + "\t".join(map(str, find_cost_cost_list)) + "\n"
-            file.write(cost_str)
-            r_str = "recall" + "\t" + "\t".join(map(str, find_cost_r_list)) + "\n"
-            file.write(r_str)
-            p_str = "precision" + "\t" + "\t".join(map(str, find_cost_p_list)) + "\n"
-            file.write(p_str)
-            acc_str = "accuracy" + "\t" + "\t".join(map(str, find_cost_acc_list)) + "\n"
-            file.write(acc_str)
-            file.write("time" + "\t" + str(find_cost_time) + "\n\n")
-
-        avg_acc, avg_recall, avg_precision = PQE_better(
-            num_sample,
-            Oracle_dist,
-            true_ans_D,
-            oracle_dist_S,
-            proxy_dist_S,
-            optimal_cost,
-            recall_target,
-            Dist_t,
-            Prob,
-            seed,
-        )
-        file_name2 = (
-            f"results_NNH/PQE-better1/" + Fname + "_" + H1_op + f"_1007_{version}.txt"
-        )
-        with open(file_name2, "a") as file:
-            # Write the header (if it's not already present in the file)
-            if seed == seed_l[0]:
-                file.write(
-                    "optimal cost\trecall achieved by find cost function\tprecision achieved by find cost function\tavg acc\tavg recall\tavg precision\tGT proportion\n"
-                )
-
-            # Write the data for the current seed
-            file.write(
-                f"seed = {seed:.4f}\t{optimal_cost:.4f}\t{RT_recall:.4f}\t{RT_precision:.4f}\t"
-                f"{avg_acc:.4f}\t{avg_recall:.4f}\t{avg_precision:.4f}\t{prop_D:.4f}\n"
-            )
-        print(
-            f"At recall target={recall_target}; we find optimal cost={optimal_cost} which achieves recall {RT_recall} and precision {RT_precision}"
-        )
-        print(
-            f"avg acc: {avg_acc}, avg recall: {avg_recall}, avg precision: {avg_precision}"
-        )
-        end_time = time.time()
-        print("execution time is %.2fs" % (end_time - start_time))
+    end_time = time.time()
+    print("execution time is %.2fs" % (end_time - start_time))

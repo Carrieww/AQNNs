@@ -216,15 +216,15 @@ def one_sample_t_test(l, c, alpha=0.05, alternative="two-sided"):
 
     if p_value < alpha:
         rejectH0 = True
-        print(
-            f"The test (c = {c}, op = {alternative}) is significant, we shall reject the null hypothesis."
-        )
+        # print(
+        #     f"The test (c = {c}, op = {alternative}) is significant, we shall reject the null hypothesis."
+        # )
     elif p_value >= alpha:
         rejectH0 = False
-        print(
-            f"The test (c = {c}, op = {alternative}) is NOT significant, we shall accept the null hypothesis."
-        )
-    print(f"confidence interval is ({round(CI_lower,4), round(CI_upper,4)})")
+        # print(
+        #     f"The test (c = {c}, op = {alternative}) is NOT significant, we shall accept the null hypothesis."
+        # )
+    # print(f"confidence interval is ({round(CI_lower,4), round(CI_upper,4)})")
     return t_stat, p_value, rejectH0, CI_lower, CI_upper
 
 
@@ -233,19 +233,19 @@ def HT_acc_t_test(l, c, operator, GT=None, is_D=False):
         l, c, alternative=operator
     )
 
-    print("T-Statistic:", t_stat)
-    print("P-Value:", p_value)
+    # print("T-Statistic:", t_stat)
+    # print("P-Value:", p_value)
 
     if is_D:
         align = True
-        print(f"The ans in D to reject H0 result is : {rejectH0}")
-        print("align with ground truth?", align)
+        # print(f"The ans in D to reject H0 result is : {rejectH0}")
+        # print("align with ground truth?", align)
 
     else:
-        print(f"The ans to reject H0 result is : {rejectH0}")
+        # print(f"The ans to reject H0 result is : {rejectH0}")
         assert GT is not None, "GT is None"
         align = rejectH0 == GT
-        print("align with ground truth?", align)
+        # print("align with ground truth?", align)
 
     return align, rejectH0, CI_l, CI_h
 
@@ -321,7 +321,10 @@ def agg_value(D, ind_list, attr_id, agg):
             pass
 
     if agg == "mean":
-        res = sum(l) / len(l)
+        if len(l) == 0:
+            res = np.nan
+        else:
+            res = sum(l) / len(l)
     else:
         raise Exception(f"The case for {agg} has not been implemented yet")
     return l, res
@@ -336,18 +339,31 @@ if __name__ == "__main__":
     Prob = 0.95
     Dist_t = 0.85
     H1_op = "less"
-    seed_l = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    seed_l = [10]
+    seed_cost_dict = {
+        1: 100,
+        2: 100,
+        3: 100,
+        4: 100,
+        5: 100,
+        6: 100,
+        7: 100,
+        8: 100,
+        9: 100,
+        10: 100,
+    }
+
     print(f"Prob: {Prob}; r: {Dist_t}; seed list: {seed_l}")
 
-    save_path = f"results_CNNH/RS/" + Fname + "_" + H1_op + f"_1006.txt"
+    save_path = f"results_CNNH/RS/" + Fname + "_" + H1_op + f"_1015.txt"
     Path(f"./results_CNNH/RS/").mkdir(parents=True, exist_ok=True)
-    with open(
-        save_path,
-        "a",
-    ) as file:
-        file.write(
-            "seed\tsample size\tavg prop_S\tavg lower CI\tavg upper CI\tavg acc\tavg rejH0\tavg time\n"
-        )
+    # with open(
+    #     save_path,
+    #     "a",
+    # ) as file:
+    #     file.write(
+    #         "seed\tsample size\tavg prop_S\tavg lower CI\tavg upper CI\tavg acc\tavg rejH0\tavg time\n"
+    #     )
 
     D_attr = get_data(filename="data/eICU_new/" + Fname + ".testfull")
     agg = "mean"
@@ -364,14 +380,15 @@ if __name__ == "__main__":
 
     if Fname == "icd9_eICU":
         # sample_size_list = [8000,8100,8200,8236]
-        sample_size_list = list(range(200, 2010, 200))
+        sample_size_list = [900]
         # sample_size_list = list(range(500, 4001, 500))
     elif Fname == "icd9_mimic":
         # sample_size_list = [4000,4100,4200,4244]
         sample_size_list = list(range(1000, 4001, 1000))
     res = defaultdict(list)
 
-    for seed in seed_l:
+    for seed, cost in seed_cost_dict.items():
+        sample_size_list = [cost]
         np.random.seed(seed)
         Index = np.random.choice(range(len(Oracle_emb)), size=num_query, replace=False)
 
@@ -382,9 +399,9 @@ if __name__ == "__main__":
         l_D, agg_D = agg_value(D_attr, true_ans_D, attr_id, agg)
 
         _, agg_D_full = agg_value(D_attr, range(len(D_attr)), attr_id, agg)
-        print(
-            f"The number of NN in D is {len(true_ans_D)} ({len(true_ans_D)/Proxy_dist.shape[0]}%), the GT aggregated value of NN is {agg_D} and the aggregated value in D is {agg_D_full}"
-        )
+        # print(
+        #     f"The number of NN in D is {len(true_ans_D)} ({len(true_ans_D)/Proxy_dist.shape[0]}%), the GT aggregated value of NN is {agg_D} and the aggregated value in D is {agg_D_full}"
+        # )
 
         for sample_size in sample_size_list:
             print(f"sample size: {sample_size}")
@@ -409,21 +426,21 @@ if __name__ == "__main__":
 
                 true_ans_S = np.where(oracle_dist_S <= Dist_t)[0]
                 l_S, agg_S = agg_value(D_attr, true_ans_S, attr_id, agg)
-                print(
-                    f"The number of NN in S is {len(true_ans_S)} ({len(true_ans_S)/proxy_dist_S.shape[0]}%), the aggregated value is {agg_S}"
-                )
+                # print(
+                #     f"The number of NN in S is {len(true_ans_S)} ({len(true_ans_S)/proxy_dist_S.shape[0]}%), the aggregated value is {agg_S}"
+                # )
 
                 time_one_sample = time.time() - one_sample_start
 
                 for fac in fac_list:
                     c_time_GT = agg_D * fac
-                    print(f">>> c is {c_time_GT}")
+                    # print(f">>> c is {c_time_GT}")
 
                     _, GT, GT_CI_l, GT_CI_h = HT_acc_t_test(
                         l_D, c_time_GT, H1_op, is_D=True
                     )
 
-                    print(f"the ground truth to reject H0 result is : {GT}")
+                    # print(f"the ground truth to reject H0 result is : {GT}")
                     align_S, rej_S, CI_l_S, CI_h_S = HT_acc_t_test(
                         l_S, c_time_GT, H1_op, GT=GT, is_D=False
                     )
@@ -444,12 +461,14 @@ if __name__ == "__main__":
                 round(np.mean(rejH0_l), 4),
                 round(np.mean(time_l), 4),
             ]
-            with open(
-                save_path,
-                "a",
-            ) as file:
-                results_str = "\t".join(map(str, backup_res)) + "\n"
-                file.write(results_str)
+            # with open(
+            #     save_path,
+            #     "a",
+            # ) as file:
+            #     results_str = "\t".join(map(str, backup_res)) + "\n"
+            #     file.write(results_str)
+            results_str = "\t".join(map(str, backup_res)) + "\n"
+            print(results_str)
 
     end_time = time.time()
     print("execution time is %.2fs" % (end_time - start_time))
