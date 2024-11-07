@@ -2,18 +2,16 @@ from math import floor, ceil
 from collections import defaultdict
 
 from aquapro_util import (
-    load_data,
+    get_data,
     preprocess_dist,
     preprocess_topk_phi,
-    preprocess_ranks,
-)
-from aquapro_util import (
+    preprocess_sync,
     array_union,
     set_diff,
 )
 
 from numba import njit
-from hyper_parameter import std_offset
+from hyper_parameter import std_offset, norm_scale
 import numpy as np
 
 # import pickle
@@ -189,19 +187,19 @@ def test_PQE_RT(oracle_dist, proxy_dist, bd, t=0.9, prob=0.9, rt=0.9):
 
 
 def HT_acc(name, ans, total, op, GT, prop_c):
-    print(f"finished {name} algorithm for q")
-    print(f"FRNN result: {len(ans)}")
-    print(f"total patients: {total}")
+    # print(f"finished {name} algorithm for q")
+    # print(f"FRNN result: {len(ans)}")
+    # print(f"total patients: {total}")
 
-    print(f"c proportion: {prop_c}; approx: {len(ans) / total}")
+    # print(f"c proportion: {prop_c}; approx: {len(ans) / total}")
     z_stat, p_value, reject = one_proportion_z_test(len(ans), total, prop_c, 0.05, op)
 
-    print("Z-Statistic:", z_stat)
-    print("P-Value:", p_value)
-    print("Reject Null Hypothesis:", reject)
+    # print("Z-Statistic:", z_stat)
+    # print("P-Value:", p_value)
+    # print("Reject Null Hypothesis:", reject)
 
     align = reject == GT
-    print("align:", align)
+    # print("align:", align)
 
     return align, reject
 
@@ -251,26 +249,37 @@ def one_proportion_z_test(
     return z_stat, p_value, reject
 
 
+def load_data(name=""):
+    if name in ["icd9_eICU", "icd9_mimic"]:
+        filename_pred = f"data/medical/{name}/" + name + ".pred"
+        filename_truth = f"data/medical/{name}/" + name + ".truth"
+
+        proxy_pred = np.array(get_data(filename=filename_pred))
+        oracle_pred = np.array(get_data(filename=filename_truth))
+
+        return proxy_pred, oracle_pred
+
+
 # pre_compile()
 if __name__ == "__main__":
     start_time = time.time()
-    Fname = "icd9_eICU"
-    Proxy_emb, Oracle_emb = load_data(name=Fname)
+    Fname = "icd9_mimic"
+    Proxy_emb, Oracle_emb = load_data(Fname)
 
     # NN algo parameters
     Prob = 0.95
     Dist_t = 0.85
     H1_op = "greater"
-    seed_l = [10]
+    seed_l = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
     print(f"Prob: {Prob}; r: {Dist_t}; seed list: {seed_l}")
 
     save_path = f"results_NNH/RS/" + Fname + "_" + H1_op + f"_1007.txt"
-    Path(f"./results_NNH/RS/").mkdir(parents=True, exist_ok=True)
-    with open(
-        save_path,
-        "a",
-    ) as file:
-        file.write("seed\tsample size\tavg prop_S\tavg acc\tavg rejH0\tavg time\n")
+    # Path(f"./results_NNH/RS/").mkdir(parents=True, exist_ok=True)
+    # with open(
+    #     save_path,
+    #     "a",
+    # ) as file:
+    #     file.write("seed\tsample size\tavg prop_S\tavg acc\tavg rejH0\tavg time\n")
 
     num_query = 1
     num_sample = 30
@@ -279,20 +288,19 @@ if __name__ == "__main__":
 
     if Fname == "icd9_eICU":
         # sample_size_list = [8000,8100,8200,8236]
-        sample_size_list = [900]
+        sample_size_list = [100]
         # sample_size_list = list(range(500, 4001, 500))
     elif Fname == "icd9_mimic":
         # sample_size_list = [4000,4100,4200,4244]
-        sample_size_list = list(range(1000, 4001, 1000))
+        sample_size_list = [600]
     res = defaultdict(list)
 
     for seed in seed_l:
         np.random.seed(seed)
         Index = np.random.choice(range(len(Oracle_emb)), size=num_query, replace=False)
 
-        Proxy_dist, Oracle_dist = preprocess_dist(
-            Oracle_emb, Proxy_emb, Oracle_emb[[Index[0]]]
-        )
+        Proxy_dist, _ = preprocess_dist(Oracle_emb, Proxy_emb, Oracle_emb[[Index[0]]])
+        Oracle_dist = preprocess_sync(Proxy_dist, norm_scale)
         # Ranks = preprocess_ranks(Proxy_dist)
         true_ans_D = np.where(Oracle_dist <= Dist_t)[0]
 
@@ -320,15 +328,15 @@ if __name__ == "__main__":
 
                 true_ans_S = np.where(oracle_dist_S <= Dist_t)[0]
                 prop_S = round(true_ans_S.shape[0] / S_size, 4)
-                print(
-                    f"prop_S at {sample_ind}-th sample is: ",
-                    prop_S,
-                )
+                # print(
+                #     f"prop_S at {sample_ind}-th sample is: ",
+                #     prop_S,
+                # )
                 time_one_sample = time.time() - one_sample_start
 
                 for fac in fac_list:
                     c_time_GT = (len(true_ans_D) / Oracle_dist.shape[0]) * fac
-                    print(f">>> c is {c_time_GT}")
+                    # print(f">>> c is {c_time_GT}")
                     _, _, GT = one_proportion_z_test(
                         len(true_ans_D),
                         Oracle_dist.shape[0],
@@ -336,7 +344,7 @@ if __name__ == "__main__":
                         0.05,
                         H1_op,
                     )
-                    print(f"the ground truth to reject H0 result is : {GT}")
+                    # print(f"the ground truth to reject H0 result is : {GT}")
                     align, reject = HT_acc(
                         "RNS",
                         true_ans_S,
@@ -364,8 +372,8 @@ if __name__ == "__main__":
             # ) as file:
             #     results_str = "\t".join(map(str, backup_res)) + "\n"
             #     file.write(results_str)
-            results_str = "\t".join(map(str, backup_res)) + "\n"
-            print(results_str)
+            print(backup_res)
+            print("\n")
 
     end_time = time.time()
     print("execution time is %.2fs" % (end_time - start_time))

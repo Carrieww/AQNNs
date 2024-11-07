@@ -7,11 +7,12 @@ from pathlib import Path
 from math import floor, ceil
 from scipy.stats import norm
 from collections import defaultdict
-from hyper_parameter import std_offset
+from hyper_parameter import std_offset, norm_scale
 
 from aquapro_util import (
-    load_data,
+    get_data,
     preprocess_dist,
+    preprocess_sync,
     preprocess_topk_phi,
 )
 from aquapro_util import (
@@ -210,7 +211,7 @@ def one_sample_t_test(l, c, alpha=0.05, alternative="two-sided"):
     CI_lower, CI_upper = stats.t.interval(
         confidence=1 - alpha,
         df=len(l) - 1,
-        loc=np.mean(l),
+        loc=np.nanmean(l),
         scale=stats.sem(l),
     )
 
@@ -330,15 +331,30 @@ def agg_value(D, ind_list, attr_id, agg):
     return l, res
 
 
+def load_data(name=""):
+    if name in ["icd9_eICU", "icd9_mimic"]:
+        filename_pred = f"data/medical/{name}/" + name + ".pred"
+        filename_truth = f"data/medical/{name}/" + name + ".truth"
+
+        proxy_pred = np.array(get_data(filename=filename_pred))
+        oracle_pred = np.array(get_data(filename=filename_truth))
+
+        return proxy_pred, oracle_pred
+
+
 if __name__ == "__main__":
+    import warnings
+
+    warnings.filterwarnings("ignore")
+
     start_time = time.time()
     Fname = "icd9_eICU"
     Proxy_emb, Oracle_emb = load_data(name=Fname)
 
     # NN algo parameters
     Prob = 0.95
-    Dist_t = 0.85
-    H1_op = "less"
+    Dist_t = 0.5
+
     seed_l = [10]
     seed_cost_dict = {
         1: 100,
@@ -354,121 +370,131 @@ if __name__ == "__main__":
     }
 
     print(f"Prob: {Prob}; r: {Dist_t}; seed list: {seed_l}")
+    D_attr = get_data(filename=f"data/medical/{Fname}/{Fname}.testfull")
+    for H1_op in ["greater", "less"]:
+        for attr, attr_id in {"age": 1}.items():
+            agg = "mean"
+            # attr = "height"
+            # attr_id = 2
+            subject = "of NNs of q"
+            print(f"Prob: {Prob}; r: {Dist_t}")
+            print(f"H1: {agg} {attr} {subject} is {H1_op}")
 
-    save_path = f"results_CNNH/RS/" + Fname + "_" + H1_op + f"_1015.txt"
-    Path(f"./results_CNNH/RS/").mkdir(parents=True, exist_ok=True)
-    # with open(
-    #     save_path,
-    #     "a",
-    # ) as file:
-    #     file.write(
-    #         "seed\tsample size\tavg prop_S\tavg lower CI\tavg upper CI\tavg acc\tavg rejH0\tavg time\n"
-    #     )
-
-    D_attr = get_data(filename="data/eICU_new/" + Fname + ".testfull")
-    agg = "mean"
-    attr = "age"
-    attr_id = 1
-    subject = "of NNs of q"
-    print(f"Prob: {Prob}; r: {Dist_t}")
-    print(f"H1: {agg} {attr} {subject} is {H1_op}")
-
-    num_query = 1
-    num_sample = 30
-    fac_list = np.arange(0.5, 1.51, 0.05)
-    fac_list = [round(num, 4) for num in fac_list]
-
-    if Fname == "icd9_eICU":
-        # sample_size_list = [8000,8100,8200,8236]
-        sample_size_list = [900]
-        # sample_size_list = list(range(500, 4001, 500))
-    elif Fname == "icd9_mimic":
-        # sample_size_list = [4000,4100,4200,4244]
-        sample_size_list = list(range(1000, 4001, 1000))
-    res = defaultdict(list)
-
-    for seed, cost in seed_cost_dict.items():
-        sample_size_list = [cost]
-        np.random.seed(seed)
-        Index = np.random.choice(range(len(Oracle_emb)), size=num_query, replace=False)
-
-        Proxy_dist, Oracle_dist = preprocess_dist(
-            Oracle_emb, Proxy_emb, Oracle_emb[[Index[0]]]
-        )
-        true_ans_D = np.where(Oracle_dist <= Dist_t)[0]
-        l_D, agg_D = agg_value(D_attr, true_ans_D, attr_id, agg)
-
-        _, agg_D_full = agg_value(D_attr, range(len(D_attr)), attr_id, agg)
-        # print(
-        #     f"The number of NN in D is {len(true_ans_D)} ({len(true_ans_D)/Proxy_dist.shape[0]}%), the GT aggregated value of NN is {agg_D} and the aggregated value in D is {agg_D_full}"
-        # )
-
-        for sample_size in sample_size_list:
-            print(f"sample size: {sample_size}")
-            acc_l = []
-            rejH0_l = []
-            time_l = []
-            agg_S_l = []
-            CI_l_S_l = []
-            CI_h_S_l = []
-
-            for sample_ind in range(num_sample):
-                np.random.seed(seed * sample_ind)
-                one_sample_start = time.time()
-
-                indices = np.random.choice(
-                    Oracle_dist.shape[0], sample_size, replace=False
+            save_path = f"results_NNH/RS/" + Fname + f"_age_100_1104.txt"
+            Path(f"./results_NNH/RS/").mkdir(parents=True, exist_ok=True)
+            with open(
+                save_path,
+                "a",
+            ) as file:
+                file.write(
+                    f"Only avg variance agg S full column and sample size column are useful!"
                 )
-                oracle_dist_S = Oracle_dist[indices]
-                proxy_dist_S = Proxy_dist[indices]
-                # ranks_S = preprocess_ranks(proxy_dist_S)
-                S_size = oracle_dist_S.shape[0]
+                file.write(
+                    f">>>>> Attribute: {attr}; H1_op: {H1_op}; Dist_t: {Dist_t} \n"
+                )
+                file.write("seed\tsample size\tNN\tavg agg S\tavg CI\tavg acc\n")
 
-                true_ans_S = np.where(oracle_dist_S <= Dist_t)[0]
-                l_S, agg_S = agg_value(D_attr, true_ans_S, attr_id, agg)
-                # print(
-                #     f"The number of NN in S is {len(true_ans_S)} ({len(true_ans_S)/proxy_dist_S.shape[0]}%), the aggregated value is {agg_S}"
-                # )
+            num_query = 1
+            num_sample = 30
+            fac_list = np.arange(0.5, 1.51, 0.05)
+            fac_list = [round(num, 4) for num in fac_list]
 
-                time_one_sample = time.time() - one_sample_start
+            # if Fname == "icd9_eICU":
+            #     # sample_size_list = [8000,8100,8200,8236]
+            #     sample_size_list = [100]
+            #     # sample_size_list = list(range(500, 4001, 500))
+            # elif Fname == "icd9_mimic":
+            #     # sample_size_list = [4000,4100,4200,4244]
+            #     sample_size_list = list(range(1000, 4001, 1000))
+            res = defaultdict(list)
 
-                for fac in fac_list:
-                    c_time_GT = agg_D * fac
-                    # print(f">>> c is {c_time_GT}")
+            for seed, cost in seed_cost_dict.items():
+                # sample_size_list = [1000, 1500, 2000, 2500]
+                sample_size_list = [cost]
+                np.random.seed(seed)
+                Index = np.random.choice(
+                    range(len(Oracle_emb)), size=num_query, replace=False
+                )
 
-                    _, GT, GT_CI_l, GT_CI_h = HT_acc_t_test(
-                        l_D, c_time_GT, H1_op, is_D=True
-                    )
+                Proxy_dist, _ = preprocess_dist(
+                    Oracle_emb, Proxy_emb, Oracle_emb[[Index[0]]]
+                )
+                Oracle_dist = preprocess_sync(Proxy_dist, norm_scale)
+                true_ans_D = np.where(Oracle_dist <= Dist_t)[0]
+                l_D, agg_D = agg_value(D_attr, true_ans_D, attr_id, agg)
 
-                    # print(f"the ground truth to reject H0 result is : {GT}")
-                    align_S, rej_S, CI_l_S, CI_h_S = HT_acc_t_test(
-                        l_S, c_time_GT, H1_op, GT=GT, is_D=False
-                    )
-                    acc_l.append(align_S)
-                    rejH0_l.append(rej_S)
-                    time_l.append(time_one_sample)
-                    agg_S_l.append(agg_S)
-                    CI_l_S_l.append(CI_l_S)
-                    CI_h_S_l.append(CI_h_S)
+                for sample_size in sample_size_list:
+                    print(f"sample size: {sample_size}")
+                    acc_l = []
+                    # rejH0_l = []
+                    # time_l = []
+                    agg_S_l = []
+                    diff_agg_D_S_l = []
+                    agg_S_full_l = []
+                    CI_S_l = []
+                    # CI_h_S_l = []
+                    NN_l = []
 
-            backup_res = [
-                seed,
-                sample_size,
-                round(np.mean(agg_S_l), 4),
-                round(np.mean(CI_l_S_l), 4),
-                round(np.mean(CI_h_S_l), 4),
-                round(np.mean(acc_l), 4),
-                round(np.mean(rejH0_l), 4),
-                round(np.mean(time_l), 4),
-            ]
-            # with open(
-            #     save_path,
-            #     "a",
-            # ) as file:
-            #     results_str = "\t".join(map(str, backup_res)) + "\n"
-            #     file.write(results_str)
-            results_str = "\t".join(map(str, backup_res)) + "\n"
-            print(results_str)
+                    for sample_ind in range(num_sample):
+                        np.random.seed(seed * sample_ind)
+                        one_sample_start = time.time()
+
+                        indices = np.random.choice(
+                            Oracle_dist.shape[0], sample_size, replace=False
+                        )
+                        oracle_dist_S = Oracle_dist[indices]
+                        proxy_dist_S = Proxy_dist[indices]
+                        S_attr = [D_attr[i] for i in indices]
+                        # ranks_S = preprocess_ranks(proxy_dist_S)
+                        S_size = oracle_dist_S.shape[0]
+
+                        true_ans_S = np.where(oracle_dist_S <= Dist_t)[0]
+
+                        l_S, agg_S = agg_value(S_attr, true_ans_S, attr_id, agg)
+                        # l_S_full, agg_S_full = agg_value(
+                        #     S_attr, range(len(S_attr)), attr_id, agg
+                        # )
+
+                        print(
+                            f"The number of NN in S is {len(true_ans_S)} ({len(true_ans_S)/proxy_dist_S.shape[0]}%), the aggregated value is {agg_S}"
+                        )
+                        NN = len(true_ans_S)
+
+                        time_one_sample = time.time() - one_sample_start
+
+                        for fac in fac_list:
+                            c_time_GT = agg_D * fac
+                            # print(f">>> c is {c_time_GT}")
+
+                            _, GT, GT_CI_l, GT_CI_h = HT_acc_t_test(
+                                l_D, c_time_GT, H1_op, is_D=True
+                            )
+
+                            # print(f"the ground truth to reject H0 result is : {GT}")
+                            align_S, rej_S, CI_l_S, CI_h_S = HT_acc_t_test(
+                                l_S, c_time_GT, H1_op, GT=GT, is_D=False
+                            )
+                            acc_l.append(align_S)
+                            agg_S_l.append(agg_S)
+                            CI_S_l.append(CI_h_S - CI_l_S)
+                            NN_l.append(NN)
+
+                    backup_res = [
+                        seed,
+                        sample_size,
+                        round(np.nanmean(NN_l), 4),
+                        round(np.nanmean(agg_S_l), 4),
+                        round(np.nanmean(CI_S_l), 4),
+                        round(np.nanmean(acc_l), 4),
+                    ]
+                    with open(
+                        save_path,
+                        "a",
+                    ) as file:
+                        results_str = "\t".join(map(str, backup_res)) + "\n"
+                        file.write(results_str)
+                    # results_str = "\t".join(map(str, backup_res))
+                    # print(results_str)
 
     end_time = time.time()
     print("execution time is %.2fs" % (end_time - start_time))
