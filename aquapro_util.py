@@ -6,8 +6,9 @@ import matplotlib.pyplot as plt
 from scipy.spatial.distance import cdist
 from scipy.stats import truncnorm, norm
 from scipy.integrate import quad
-from supg.supg.experiments.experiment import run_experiment
-from supg.supg.selector import ApproxQuery
+
+# from supg.supg.experiments.experiment import run_experiment
+# from supg.supg.selector import ApproxQuery
 from numba import njit
 from math import ceil
 import seaborn as sns
@@ -23,44 +24,24 @@ def nan2mean(dist):
 
 def get_data(filename=None, is_text=False):
     if is_text:
-        instance_list = (np.loadtxt(filename) >= 0).astype(int)
+        # instance_list = (np.loadtxt(filename) >= 0).astype(float)
+        instance_list = (np.loadtxt(filename)).astype(float)
     else:
         instance_list = pickle.load(open(filename, "rb"), encoding="latin1")
 
     return instance_list
 
 
-def load_data(name=""):
-    if name in ["icd9_eICU"]:
-        filename_pred = "data/eICU_new/" + name + ".pred"
-        filename_truth = "data/eICU_new/" + name + ".truth"
+def load_data(args):
+    name = args.Fname
+    if name in ["icd9_eICU", "icd9_mimic"]:
+        filename_pred = f"data/medical/{name}/" + name + ".pred"
+        filename_truth = f"data/medical/{name}/" + name + ".truth"
 
         proxy_pred = np.array(get_data(filename=filename_pred))
         oracle_pred = np.array(get_data(filename=filename_truth))
 
         return proxy_pred, oracle_pred
-    elif name in ["icd9_mimic"]:
-        filename_pred = "data/" + name + ".pred"
-        filename_truth = "data/" + name + ".truth"
-
-        proxy_pred = np.array(get_data(filename=filename_pred))
-        oracle_pred = np.array(get_data(filename=filename_truth))
-
-        return proxy_pred, oracle_pred
-
-    elif name in ["voc", "coco"]:
-        filename_pred = "data/" + name + "_output_scores.txt"
-        filename_truth = "data/" + name + "_output_targets.txt"
-
-        proxy_pred = np.array(get_data(filename=filename_pred, is_text=True))
-        oracle_pred = np.array(get_data(filename=filename_truth, is_text=True))
-
-        return proxy_pred, oracle_pred
-    else:
-        filename = "./data/" + name
-        df = pd.read_csv(filename)
-
-        return np.vstack(np.array(df["proxy_score"])), np.vstack(np.array(df["label"]))
 
 
 def preprocess_dist(oracle, proxy, query):
@@ -140,57 +121,59 @@ def plot_statics(oracle_dist, proxy_dist, sync_oracle, t, norm_scale, f):
     plt.show()
 
 
-def SUPG(oracle_dist, proxy_dist, t, primary_target, p, cost, query_type):
-    data = pd.DataFrame({"oracle": oracle_dist, "proxy": proxy_dist})
-    data = data.sort_values("proxy", axis=0, ascending=True).reset_index()
-    data["oracle"] = (data["oracle"] <= t).astype(int)
-    data["proxy"] = 1 - data["proxy"]
-    data = data.rename(
-        columns={"index": "id", "oracle": "label", "proxy": "proxy_score"}
-    )
-
-    if query_type == "RT":
-        exp_spec = {
-            "source": "outside",
-            "sampler": "ImportanceSampler",
-            "estimator": "None",
-            "query": ApproxQuery(
-                qtype="rt",
-                min_recall=primary_target,
-                min_precision=-1,
-                delta=1 - p,
-                budget=cost,
-            ),
-            "selector": "ImportanceRecall",
-            "num_trials": 1,
-        }
-    elif query_type == "PT":
-        exp_spec = {
-            "source": "outside",
-            "sampler": "ImportanceSampler",
-            "estimator": "None",
-            "query": ApproxQuery(
-                qtype="pt",
-                min_precision=primary_target,
-                min_recall=-1,
-                delta=1 - p,
-                budget=cost,
-            ),
-            "selector": "ImportancePrecisionTwoStageSelector",
-            "num_trials": 1,
-        }
-    else:
-        print("unknown query type:", query_type)
-        exp_spec = {}
-
-    try:
-        precision, recall, prob_s, na_rate = run_experiment(
-            cur_experiment=exp_spec, df=data
-        )
-    except ValueError:
-        return 0, 0, 0, 0
-
-    return precision, recall, prob_s, na_rate
+#
+# def SUPG(oracle_dist, proxy_dist, t, primary_target, p, cost, query_type):
+#     data = pd.DataFrame({"oracle": oracle_dist, "proxy": proxy_dist})
+#     data = data.sort_values("proxy", axis=0, ascending=True).reset_index()
+#     data["oracle"] = (data["oracle"] <= t).astype(int)
+#     data["proxy"] = 1 - data["proxy"]
+#     data = data.rename(
+#         columns={"index": "id", "oracle": "label", "proxy": "proxy_score"}
+#     )
+#
+#     if query_type == "RT":
+#         exp_spec = {
+#             "source": "outside",
+#             "sampler": "ImportanceSampler",
+#             "estimator": "None",
+#             "query": ApproxQuery(
+#                 qtype="rt",
+#                 min_recall=primary_target,
+#                 min_precision=-1,
+#                 delta=1 - p,
+#                 budget=cost,
+#             ),
+#             "selector": "ImportanceRecall",
+#             "num_trials": 1,
+#         }
+#     elif query_type == "PT":
+#         exp_spec = {
+#             "source": "outside",
+#             "sampler": "ImportanceSampler",
+#             "estimator": "None",
+#             "query": ApproxQuery(
+#                 qtype="pt",
+#                 min_precision=primary_target,
+#                 min_recall=-1,
+#                 delta=1 - p,
+#                 budget=cost,
+#             ),
+#             "selector": "ImportancePrecisionTwoStageSelector",
+#             "num_trials": 1,
+#         }
+#     else:
+#         print("unknown query type:", query_type)
+#         exp_spec = {}
+#
+#     try:
+#         precision, recall, prob_s, na_rate = run_experiment(
+#             cur_experiment=exp_spec, df=data
+#         )
+#     except ValueError:
+#         return 0, 0, 0, 0
+#
+#     return precision, recall, prob_s, na_rate
+#
 
 
 @njit
