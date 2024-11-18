@@ -1,16 +1,12 @@
 import numpy as np
-import pandas as pd
+from hyper_parameter import norm_scale
 import pickle
 import scipy
 import matplotlib.pyplot as plt
 from scipy.spatial.distance import cdist
 from scipy.stats import truncnorm, norm
-from scipy.integrate import quad
 
-# from supg.supg.experiments.experiment import run_experiment
-# from supg.supg.selector import ApproxQuery
 from numba import njit
-from math import ceil
 import seaborn as sns
 
 sns.set_theme(style="ticks")
@@ -24,7 +20,6 @@ def nan2mean(dist):
 
 def get_data(filename=None, is_text=False):
     if is_text:
-        # instance_list = (np.loadtxt(filename) >= 0).astype(float)
         instance_list = (np.loadtxt(filename)).astype(float)
     else:
         instance_list = pickle.load(open(filename, "rb"), encoding="latin1")
@@ -121,90 +116,6 @@ def plot_statics(oracle_dist, proxy_dist, sync_oracle, t, norm_scale, f):
     plt.show()
 
 
-#
-# def SUPG(oracle_dist, proxy_dist, t, primary_target, p, cost, query_type):
-#     data = pd.DataFrame({"oracle": oracle_dist, "proxy": proxy_dist})
-#     data = data.sort_values("proxy", axis=0, ascending=True).reset_index()
-#     data["oracle"] = (data["oracle"] <= t).astype(int)
-#     data["proxy"] = 1 - data["proxy"]
-#     data = data.rename(
-#         columns={"index": "id", "oracle": "label", "proxy": "proxy_score"}
-#     )
-#
-#     if query_type == "RT":
-#         exp_spec = {
-#             "source": "outside",
-#             "sampler": "ImportanceSampler",
-#             "estimator": "None",
-#             "query": ApproxQuery(
-#                 qtype="rt",
-#                 min_recall=primary_target,
-#                 min_precision=-1,
-#                 delta=1 - p,
-#                 budget=cost,
-#             ),
-#             "selector": "ImportanceRecall",
-#             "num_trials": 1,
-#         }
-#     elif query_type == "PT":
-#         exp_spec = {
-#             "source": "outside",
-#             "sampler": "ImportanceSampler",
-#             "estimator": "None",
-#             "query": ApproxQuery(
-#                 qtype="pt",
-#                 min_precision=primary_target,
-#                 min_recall=-1,
-#                 delta=1 - p,
-#                 budget=cost,
-#             ),
-#             "selector": "ImportancePrecisionTwoStageSelector",
-#             "num_trials": 1,
-#         }
-#     else:
-#         print("unknown query type:", query_type)
-#         exp_spec = {}
-#
-#     try:
-#         precision, recall, prob_s, na_rate = run_experiment(
-#             cur_experiment=exp_spec, df=data
-#         )
-#     except ValueError:
-#         return 0, 0, 0, 0
-#
-#     return precision, recall, prob_s, na_rate
-#
-
-
-@njit
-def draw_sample_s_m(D, best_s, best_m):
-    samples = list()
-    if best_m == -1:
-        return np.arange(D)
-    elif best_s == 1:
-        sample = np.random.choice(D, size=best_m, replace=True)
-        samples.extend(sample)
-    else:
-        for _ in range(best_m):
-            sample = np.random.choice(D, size=best_s, replace=False)
-            samples.extend(sample)
-    # find the sorted unique samples
-    samples = np.unique(np.array(samples))
-
-    return samples
-
-
-@njit
-def compute_optm(s, p, D, K):
-    if K == 0:
-        print("K==0")
-        return -1
-
-    denom = np.sum(np.array([np.log((D - s - i) / (D - i)) for i in range(K)]))
-
-    return ceil(np.log(1 - p) / denom)
-
-
 @njit
 def array_union(l1, l2):
     return np.unique(np.concatenate((l1, l2)))
@@ -216,81 +127,52 @@ def set_diff(l1, l2):
     return np.unique(l3)
 
 
-@njit
-def find_K_pt(ranks, oracle_dist, t, pt):
-    K = 0
-    true_pos = 0
-    for i in range(len(ranks)):
-        if oracle_dist[ranks[i]] <= t:
-            true_pos += 1
-            if true_pos / (i + 1) >= pt:
-                K += 1
-            else:
-                break
-    return K
-
-
-@njit
-def find_best_sm(D, K, mode, prob):
-    best_s = 0
-    best_m = 0
-    best_cost = D
-
-    if mode == "exact":
-        for s in range(1, D - K + 1):
-            m = compute_optm(s, prob, D, K)
-            cost = D * (1 - (1 - s / D) ** m)
-            if cost < best_cost:
-                best_s = s
-                best_m = m
-                best_cost = cost
-    elif mode == "approx_s1":
-        best_s = 1
-        best_m = compute_optm(best_s, prob, D, K)
-    elif mode == "approx_m1":
-        best_m = 1
-        denom = np.sum(np.array([1 / (D - i) for i in range(K)]))
-        best_s = min(D, ceil(-np.log(1 - prob) / denom))
-        # best_s = min(D, ceil(D * (1 - (1 - prob) ** (1 / K))))
+def prepare_distances(args, Oracle_emb, Proxy_emb, query_indices):
+    """Prepare distances using the specified preprocessing method."""
+    if args.PQA == "PQA":
+        Proxy_dist, _ = preprocess_dist(
+            Oracle_emb, Proxy_emb, Oracle_emb[query_indices]
+        )
+        Oracle_dist = preprocess_sync(Proxy_dist, norm_scale)
+    elif args.PQA == "PQE":
+        Proxy_dist, Oracle_dist = preprocess_dist(
+            Oracle_emb, Proxy_emb, Oracle_emb[query_indices]
+        )
     else:
-        print("unknown mode", mode)
-
-    return best_s, best_m
-
-
-def baseline_topk_phi_i(proxy_dist, norm_scale, sk, sp):
-    f_sk = 1 - norm.cdf(x=sk, loc=proxy_dist, scale=norm_scale)
-    f_sp = 1 - norm.cdf(x=sp, loc=proxy_dist, scale=norm_scale)
-
-    f_sp = np.clip(f_sp, a_min=1e-8, a_max=None)
-
-    return (1 - f_sk) / f_sp
+        raise ValueError(f"Invalid PQA: {args.PQA}")
+    return Oracle_dist, Proxy_dist
 
 
-def baseline_topk_pi(proxy_dist, norm_scale, s):
-    f = 1 - norm.cdf(x=s, loc=proxy_dist, scale=norm_scale)
-
-    return np.prod(f)
-
-
-def baseline_topk_topc_tableu(oracle_dist, table_c, k):
-    table_all = np.arange(len(oracle_dist))
-    k2v_c = sorted([(_, oracle_dist[int(_)]) for _ in table_c], key=lambda x: x[1])
-    topk_c = [int(_[0]) for _ in k2v_c[:k]]
-    table_u = np.setdiff1d(table_all, table_c)
-
-    return topk_c, table_u
+def is_int(string):
+    try:
+        int(string)
+        return True
+    except ValueError:
+        return False
 
 
-def baseline_topk_xf(sp, sk, p_d, short_dist, norm_scale):
-    def intergrand(x):
-        xf = np.prod(1 - norm.cdf(x=x, loc=short_dist, scale=norm_scale))
-        return norm.pdf(x, loc=p_d, scale=norm_scale) * xf
+def agg_value(D, ind_list, attr_id, agg):
+    l = []
+    for ans_id in ind_list:
+        value = D[ans_id][2][attr_id]
+        if is_int(value):
+            value = int(value)
+            if not np.isnan(value):
+                l.append(int(value))
+        else:
+            pass
 
-    intgrl = quad(intergrand, sp, sk)[0]
+    if agg == "mean":
+        if len(l) == 0:
+            res = np.nan
+        else:
+            res = sum(l) / len(l)
+    else:
+        raise Exception(f"The case for {agg} has not been implemented yet")
+    return l, res
 
-    term_3 = norm.cdf(x=sp, loc=p_d, scale=norm_scale) * np.prod(
-        1 - norm.cdf(x=sp, loc=short_dist, scale=norm_scale)
-    )
 
-    return intgrl + term_3
+def verbose_print(args, *messages):
+    """Print messages if verbose mode is enabled."""
+    if args.verbose:
+        print(*messages)

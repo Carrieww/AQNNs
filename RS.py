@@ -1,526 +1,225 @@
 import time
-import pickle
+import argparse
 import numpy as np
-from numba import njit
-from scipy import stats
 from pathlib import Path
-from math import floor, ceil
-from scipy.stats import norm
-from collections import defaultdict
-from hyper_parameter import std_offset, norm_scale
 
 from aquapro_util import (
-    set_diff,
+    prepare_distances,
+    agg_value,
     get_data,
-    array_union,
-    preprocess_dist,
-    preprocess_sync,
-    preprocess_topk_phi,
+    load_data,
+    verbose_print,
 )
+from HT_test import HT_acc_t_test, one_proportion_z_test, HT_acc_z_test
 
 
-@njit
-def test_PQA_PT(oracle_dist, phi, topk, t=0.9, prob=0.9, pt=0.9, pilots=None):
-    true_ans = np.where(oracle_dist <= t)[0]
-    if len(true_ans) == 0:
-        return 0, 0, 0, np.empty(0, dtype=np.int64)
-
-    pbs = np.zeros(len(phi) + 1)
-    k_star = 0
-
-    for i in range(1, len(phi) + 1):
-        if i == 1:
-            pbs[0] = 1 - phi[0]
-            pbs[1] = phi[0]
-        else:
-            shift_pbs = np.roll(pbs, 1) * phi[i - 1]
-            pbs = pbs * (1 - phi[i - 1]) + shift_pbs
-
-        idx_s = ceil(i * pt)
-        precis_prob = np.sum(pbs[idx_s : i + 1])
-
-        if precis_prob >= prob:
-            k_star = i
-
-    if k_star == 0:
-        return 0, 0, 0, np.empty(0, dtype=np.int64)
-
-    if pilots is None:
-        ans = topk[:k_star]
-    else:
-        pilots_false = pilots[np.where(oracle_dist[pilots] > t)[0]]
-        ans = set_diff(array_union(topk[:k_star], pilots), pilots_false)
-
-    true_pos = len(np.intersect1d(ans, true_ans))
-    precision = true_pos / len(ans)
-    recall = true_pos / len(true_ans)
-
-    return precision, recall, k_star, ans
-
-
-@njit
-def test_PQA_RT(oracle_dist, phi, topk, t=0.9, prob=0.9, rt=0.9, pilots=None):
-    true_ans = np.where(oracle_dist <= t)[0]
-    if len(true_ans) == 0:
-        return 0, 0, len(oracle_dist), np.empty(0, dtype=np.int64)
-
-    L = 1
-    R = len(phi)
-
-    def pb_distribution(phii, p):
-        for j in range(1, len(phii) + 1):
-            if j == 1:
-                p[0] = 1 - phii[0]
-                p[1] = phii[0]
-            else:
-                shift_p = np.roll(p, 1) * phii[j - 1]
-                p = p * (1 - phii[j - 1]) + shift_p
-
-        return p
-
-    while L < R:
-        mid = floor((L + R) / 2)
-
-        pbs = pb_distribution(phi[:mid], np.zeros(len(phi) + 1))
-        pbc = pb_distribution(phi[mid:], np.zeros(len(phi) + 1))
-
-        recall_prob = 0
-        for i in range(mid + 1):
-            cdf = np.sum(pbc[: floor((1 - rt) * i / rt) + 1])
-            recall_prob += pbs[i] * cdf
-
-        if recall_prob < prob:
-            L = mid + 1
-        else:
-            R = mid
-
-    k_star = L
-    max_exp = 0
-    pbs = np.zeros(len(phi) + 1)
-
-    for i in range(L, len(phi) + 1):
-        if i == L:
-            pbs = pb_distribution(phi[:L], np.zeros(len(phi) + 1))
-        else:
-            shift_pbs = np.roll(pbs, 1) * phi[i - 1]
-            pbs = pbs * (1 - phi[i - 1]) + shift_pbs
-
-        exp_precis = np.sum(np.array([pbs[j] * j / i for j in range(i + 1)]))
-        if exp_precis >= max_exp:
-            k_star = i
-            max_exp = exp_precis
-
-    if pilots is None:
-        ans = topk[:k_star]
-    else:
-        pilots_false = pilots[np.where(oracle_dist[pilots] > t)[0]]
-        ans = set_diff(array_union(topk[:k_star], pilots), pilots_false)
-
-    true_pos = len(np.intersect1d(ans, true_ans))
-    precision = true_pos / len(ans)
-    recall = true_pos / len(true_ans)
-
-    return precision, recall, k_star, ans
-
-
-def test_PQE_PT(oracle_dist, proxy_dist, bd, t=0.9, prob=0.9, pt=0.9):
-    imp_p = (1 - proxy_dist + 1e-3) / np.sum(1 - proxy_dist + 1e-3)
-    samples = np.random.choice(len(oracle_dist), size=bd, replace=False, p=imp_p)
-
-    est_scale = np.std(oracle_dist[samples] - proxy_dist[samples]) + std_offset
-    print(f"norm scale is {est_scale}")
-
-    topk, phi = preprocess_topk_phi(proxy_dist, norm_scale=est_scale, t=t)
-
-    # # Step 3: Identify low-confidence points
-    # low_confidence_points = np.where(phi < 0.8)[0]
-
-    # # # Step 4: Sample from low-confidence points if enough points exist
-    # if len(low_confidence_points) >= bd:
-    #     samples = np.random.choice(low_confidence_points, size=bd, replace=False)
-    # else:
-    #     # If not enough low-confidence points, add some high-confidence points
-    #     high_confidence_points = np.where(phi >= 0.8)[0]
-    #     additional_samples = np.random.choice(
-    #         high_confidence_points, size=bd - len(low_confidence_points), replace=False
-    #     )
-    #     samples = np.concatenate([low_confidence_points, additional_samples])
-
-    # Step 5: Continue as usual with the precision and recall testing
-    precision, recall, _, ans = test_PQA_PT(
-        oracle_dist, phi, topk, t=t, prob=prob, pt=pt, pilots=samples
+def parse_args():
+    parser = argparse.ArgumentParser(description="Hypothesis Testing Optimization")
+    parser.add_argument("--Fname", type=str, default="icd9_eICU", help="Dataset name")
+    parser.add_argument("--Dist_t", type=float, default=0.5, help="Distance threshold")
+    parser.add_argument(
+        "--Prob", type=float, default=0.95, help="Probability threshold."
     )
-
-    return precision, recall, _, ans
-
-
-def test_PQE_RT(oracle_dist, proxy_dist, bd, t=0.9, prob=0.9, rt=0.9):
-    imp_p = (1 - proxy_dist + 1e-3) / np.sum(1 - proxy_dist + 1e-3)
-    samples = np.random.choice(len(oracle_dist), size=bd, replace=False, p=imp_p)
-
-    est_scale = np.std(oracle_dist[samples] - proxy_dist[samples]) + std_offset
-
-    topk, phi = preprocess_topk_phi(proxy_dist, norm_scale=est_scale, t=t)
-
-    # # Step 3: Identify low-confidence points
-    # low_confidence_points = np.where(phi < 0.8)[0]
-
-    # # # Step 4: Sample from low-confidence points if enough points exist
-    # if len(low_confidence_points) >= bd:
-    #     samples = np.random.choice(low_confidence_points, size=bd, replace=False)
-    # else:
-    #     # If not enough low-confidence points, add some high-confidence points
-    #     high_confidence_points = np.where(phi >= 0.8)[0]
-    #     additional_samples = np.random.choice(
-    #         high_confidence_points, size=bd - len(low_confidence_points), replace=False
-    #     )
-    #     samples = np.concatenate([low_confidence_points, additional_samples])
-
-    # Step 5: Continue as usual with the precision and recall testing
-
-    precision, recall, _, ans = test_PQA_RT(
-        oracle_dist, phi, topk, t=t, prob=prob, rt=rt, pilots=samples
+    parser.add_argument(
+        "--PQA",
+        type=str,
+        default="PQA",
+        choices=["PQA", "PQE"],
+        help="Preprocessing quality assumption",
     )
-
-    return precision, recall, _, ans
-
-
-def HT_acc_prop(name, ans, total, op, GT, prop_c):
-    print(f"finished {name} algorithm for q")
-    print(f"FRNN result: {len(ans)}")
-    print(f"total patients: {total}")
-
-    print(f"c proportion: {prop_c}; approx: {len(ans) / total}")
-    z_stat, p_value, reject = one_proportion_z_test(len(ans), total, prop_c, 0.05, op)
-
-    print("Z-Statistic:", z_stat)
-    print("P-Value:", p_value)
-    print("Reject Null Hypothesis:", reject)
-
-    align = reject == GT
-    print("align:", align)
-
-    return align, reject
-
-
-def one_sample_t_test(l, c, alpha=0.05, alternative="two-sided"):
-    global rejectH0
-    t_stat, p_value = stats.ttest_1samp(l, popmean=c, alternative=alternative)
-    CI_lower, CI_upper = stats.t.interval(
-        confidence=1 - alpha,
-        df=len(l) - 1,
-        loc=np.nanmean(l),
-        scale=stats.sem(l),
+    parser.add_argument(
+        "--hypothesis_type",
+        type=str,
+        default="P-NNH",
+        choices=["NNH", "P-NNH"],
+        help="Type of hypothesis testing",
     )
-
-    if p_value < alpha:
-        rejectH0 = True
-        # print(
-        #     f"The test (c = {c}, op = {alternative}) is significant, we shall reject the null hypothesis."
-        # )
-    elif p_value >= alpha:
-        rejectH0 = False
-        # print(
-        #     f"The test (c = {c}, op = {alternative}) is NOT significant, we shall accept the null hypothesis."
-        # )
-    # print(f"confidence interval is ({round(CI_lower,4), round(CI_upper,4)})")
-    return t_stat, p_value, rejectH0, CI_lower, CI_upper
-
-
-def HT_acc_t_test(l, c, operator, GT=None, is_D=False):
-    t_stat, p_value, rejectH0, CI_l, CI_h = one_sample_t_test(
-        l, c, alternative=operator
+    parser.add_argument(
+        "--fac_list", type=str, default="0.5,1.51,0.05", help="Factor list in range."
     )
-
-    # print("T-Statistic:", t_stat)
-    # print("P-Value:", p_value)
-
-    if is_D:
-        align = True
-        # print(f"The ans in D to reject H0 result is : {rejectH0}")
-        # print("align with ground truth?", align)
-
-    else:
-        # print(f"The ans to reject H0 result is : {rejectH0}")
-        assert GT is not None, "GT is None"
-        align = rejectH0 == GT
-        # print("align with ground truth?", align)
-
-    return align, rejectH0, CI_l, CI_h
+    parser.add_argument("--num_query", type=int, default=1, help="Number of queries")
+    parser.add_argument("--num_sample", type=int, default=30, help="Number of samples")
+    parser.add_argument("--verbose", type=bool, default=False, help="Allow print.")
+    parser.add_argument("--save", type=bool, default=True, help="Allow autosave.")
+    parser.add_argument(
+        "--seed_cost",
+        type=int,
+        nargs="+",
+        default=[1, 100, 2, 100, 3, 100],
+        help="Seed and cost pairs",
+    )
+    return parser.parse_args()
 
 
-def one_proportion_z_test(
-    successes, total_trials, null_prop, alpha=0.05, alternative="two-sided"
+def process_sample(
+    args,
+    seed,
+    Oracle_dist,
+    true_ans_D,
+    sample_size,
+    H1_op,
+    D_attr=None,
 ):
-    """
-    Perform a one-proportion z-test.
+    results = []
+    acc_l, agg_S_l, NN_S_l, CI_S_l = [], [], [], []
 
-    Parameters:
-    - successes: Number of successes.
-    - total_trials: Total number of trials.
-    - null_prop: The hypothesized population proportion under the null hypothesis.
-    - alpha: Significance level (default is 0.05).
-    - alternative: The alternative hypothesis ('two-sided', 'less', or 'greater'). Default is 'two-sided'.
+    for sample_ind in range(args.num_sample):
+        np.random.seed(seed * sample_ind)
+        indices = np.random.choice(Oracle_dist.shape[0], sample_size, replace=False)
+        oracle_dist_S = Oracle_dist[indices]
+        true_ans_S = np.where(oracle_dist_S <= args.Dist_t)[0]
+        S_size = len(indices)
 
-    Returns:
-    - z_stat: The z-statistic.
-    - p_value: The p-value.
-    - rejection: True if the null hypothesis is rejected, False otherwise.
-    """
+        if args.hypothesis_type == "NNH":
+            S_attr = [D_attr[i] for i in indices]
+            l_S, agg_S = agg_value(S_attr, true_ans_S, args.attr_id, args.agg)
+            verbose_print(args, f"Aggregation at {sample_ind}-th sample is: {agg_S}")
+        elif args.hypothesis_type == "P-NNH":
+            prop_S = round(true_ans_S.shape[0] / S_size, 4)
+            verbose_print(args, f"prop_S at {sample_ind}-th sample is: {prop_S}")
 
-    # Calculate sample proportion
-    sample_prop = successes / total_trials
+        NN_S = len(true_ans_S)
 
-    # Calculate standard error
-    std_error = (null_prop * (1 - null_prop) / total_trials) ** 0.5
+        for fac in args.fac_list:
+            if args.hypothesis_type == "NNH":
+                c_time_GT = args.agg_D * fac
+                verbose_print(args, f">>> c is {c_time_GT}")
 
-    # Calculate z-statistic
-    z_stat = (sample_prop - null_prop) / std_error
+                _, GT, GT_CI_l, GT_CI_h = HT_acc_t_test(
+                    args, args.l_D, c_time_GT, H1_op, is_D=True
+                )
+                verbose_print(args, f"the ground truth to reject H0 result is : {GT}")
+                align_S, _, CI_l_S, CI_h_S = HT_acc_t_test(
+                    args, l_S, c_time_GT, H1_op, GT=GT, is_D=False
+                )
+                acc_l.append(align_S)
+                agg_S_l.append(agg_S)
+                CI_S_l.append(abs(GT_CI_h - GT_CI_l))
+                NN_S_l.append(NN_S)
+            elif args.hypothesis_type == "P-NNH":
+                c_time_GT = (len(true_ans_D) / Oracle_dist.shape[0]) * fac
+                verbose_print(args, f">>> c is {c_time_GT}")
+                _, _, GT = one_proportion_z_test(
+                    len(true_ans_D),
+                    Oracle_dist.shape[0],
+                    c_time_GT,
+                    0.05,
+                    H1_op,
+                )
+                verbose_print(args, f"the ground truth to reject H0 result is : {GT}")
 
-    # Calculate p-value
-    if alternative == "two-sided":
-        p_value = 2 * (1 - norm.cdf(abs(z_stat)))
-    elif alternative == "less":
-        p_value = norm.cdf(z_stat)
-    elif alternative == "greater":
-        p_value = 1 - norm.cdf(z_stat)
+                align_S, _ = HT_acc_z_test(
+                    args,
+                    "RNS",
+                    true_ans_S,
+                    S_size,
+                    GT,
+                    c_time_GT,
+                    H1_op,
+                )
+                acc_l.append(align_S)
+                agg_S_l.append(prop_S)
+                CI_S_l.append(np.nan)
+                NN_S_l.append(NN_S)
 
-    # Determine rejection of null hypothesis
-    reject = p_value < alpha
-
-    return z_stat, p_value, reject
-
-
-def get_data(filename=None, is_text=False):
-    if is_text:
-        instance_list = (np.loadtxt(filename) >= 0).astype(int)
-    else:
-        instance_list = pickle.load(open(filename, "rb"), encoding="latin1")
-
-    return instance_list
-
-
-def is_int(string):
-    try:
-        int(string)
-        return True
-    except ValueError:
-        return False
-
-
-def agg_value(D, ind_list, attr_id, agg):
-    l = []
-    for ans_id in ind_list:
-        value = D[ans_id][2][attr_id]
-        if is_int(value):
-            value = int(value)
-            if not np.isnan(value):
-                l.append(int(value))
-        else:
-            pass
-
-    if agg == "mean":
-        if len(l) == 0:
-            res = np.nan
-        else:
-            res = sum(l) / len(l)
-    else:
-        raise Exception(f"The case for {agg} has not been implemented yet")
-    return l, res
+    results.append(
+        [
+            seed,
+            sample_size,
+            round(np.nanmean(NN_S_l), 4),
+            round(np.nanmean(agg_S_l), 4),
+            round(np.nanmean(CI_S_l), 4),
+            round(np.nanmean(acc_l), 4),
+        ]
+    )
+    return results
 
 
-def load_data(name=""):
-    if name in ["icd9_eICU", "icd9_mimic"]:
-        filename_pred = f"data/medical/{name}/" + name + ".pred"
-        filename_truth = f"data/medical/{name}/" + name + ".truth"
-
-        proxy_pred = np.array(get_data(filename=filename_pred))
-        oracle_pred = np.array(get_data(filename=filename_truth))
-
-        return proxy_pred, oracle_pred
-
-
-if __name__ == "__main__":
-    import warnings
-
-    warnings.filterwarnings("ignore")
-
+def main():
+    # Parse arguments and initialize
+    args = parse_args()
     start_time = time.time()
-    Fname = "icd9_eICU"
-    Proxy_emb, Oracle_emb = load_data(name=Fname)
 
-    # NN algo parameters
-    Prob = 0.95
-    Dist_t = 0.5
-    PQA = "PQA"
-    hypothesis_type = "NNH"
+    # Load data
+    Proxy_emb, Oracle_emb = load_data(args)
+    args.seed_cost_dict = dict(zip(args.seed_cost[::2], args.seed_cost[1::2]))
+    args.fac_list = np.arange(
+        float(args.fac_list.split(",")[0]),
+        float(args.fac_list.split(",")[1]),
+        float(args.fac_list.split(",")[2]),
+    )
 
-    seed_cost_dict = {
-        1: 600,
-        2: 600,
-        3: 600,
-        4: 600,
-        5: 600,
-        6: 600,
-        7: 600,
-        8: 600,
-        9: 600,
-        10: 600,
-    }
+    verbose_print(args, f"Prob: {args.Prob}; r: {args.Dist_t}")
 
-    print(f"Prob: {Prob}; r: {Dist_t}")
-    if hypothesis_type == "NNH":
-        D_attr = get_data(filename=f"data/medical/{Fname}/{Fname}.testfull")
+    # Handle hypothesis-specific setup
+    if args.hypothesis_type == "NNH":
+        D_attr = get_data(filename=f"data/medical/{args.Fname}/{args.Fname}.testfull")
+        args.agg = "mean"
+        args.attr = "age"
+        args.attr_id = 1
+        verbose_print(args, f"H1: {args.agg} {args.attr} of NNs of q is tested.")
+    elif args.hypothesis_type == "P-NNH":
+        args.attr = "proportion"
+
+    # Prepare output path
+    save_path = f"RS-results/RS/{args.hypothesis_type}-{args.Fname}.txt"
+    Path(f"./RS-results/RS/").mkdir(parents=True, exist_ok=True)
+
     for H1_op in ["greater", "less"]:
-        for attr, attr_id in {"age": 1}.items():
-            if hypothesis_type == "NNH":
-                agg = "mean"
-                # attr = "height"
-                # attr_id = 2
-                subject = "of NNs of q"
-                print(f"Prob: {Prob}; r: {Dist_t}")
-                print(f"H1: {agg} {attr} {subject} is {H1_op}")
-
-            save_path = (
-                f"RS-results/RS/{hypothesis_type}-"
-                + Fname
-                + f"_age_1104_sample_size_effect.txt"
-            )
-            Path(f"./RS-results/RS/").mkdir(parents=True, exist_ok=True)
+        if args.save:
             with open(
                 save_path,
                 "a",
             ) as file:
                 file.write(
-                    f">>>>> Attribute: {attr}; H1_op: {H1_op}; Dist_t: {Dist_t}; {PQA} \n"
+                    f">>>>> Attribute: {args.attr}; H1_op: {H1_op}; Dist_t: {args.Dist_t}; {args.PQA} \n"
                 )
                 file.write("seed\tsample size\tNN\tavg agg S\tavg CI\tavg acc\n")
 
-            num_query = 1
-            num_sample = 30
-            fac_list = np.arange(0.5, 1.51, 0.05)
-            fac_list = [round(num, 4) for num in fac_list]
+        for seed, cost in args.seed_cost_dict.items():
+            np.random.seed(seed)
+            query_indices = np.random.choice(
+                len(Oracle_emb), size=args.num_query, replace=False
+            )
+            Oracle_dist, Proxy_dist = prepare_distances(
+                args, Oracle_emb, Proxy_emb, query_indices
+            )
 
-            res = defaultdict(list)
-
-            for seed, cost in seed_cost_dict.items():
-                sample_size_list = [1000, 1500, 2000, 2500]
-                np.random.seed(seed)
-                Index = np.random.choice(
-                    range(len(Oracle_emb)), size=num_query, replace=False
+            args.true_ans_D = np.where(Oracle_dist <= args.Dist_t)[0]
+            if args.hypothesis_type == "NNH":
+                args.l_D, args.agg_D = agg_value(
+                    D_attr, args.true_ans_D, args.attr_id, args.agg
                 )
-                if PQA == "PQA":
-                    Proxy_dist, _ = preprocess_dist(
-                        Oracle_emb, Proxy_emb, Oracle_emb[[Index[0]]]
-                    )
-                    Oracle_dist = preprocess_sync(Proxy_dist, norm_scale)
-                elif PQA == "PQE":
-                    Proxy_dist, Oracle_dist = preprocess_dist(
-                        Oracle_emb, Proxy_emb, Oracle_emb[[Index[0]]]
-                    )
+                verbose_print(args, f"Ground Truth Aggregation: {args.agg_D}")
+            elif args.hypothesis_type == "P-NNH":
+                args.prop_D = len(args.true_ans_D) / Oracle_dist.shape[0]
+                verbose_print(args, f"Ground Truth Proportion: {args.prop_D}")
 
-                true_ans_D = np.where(Oracle_dist <= Dist_t)[0]
-                if hypothesis_type == "NNH":
-                    l_D, agg_D = agg_value(D_attr, true_ans_D, attr_id, agg)
-                elif hypothesis_type == "P-NNH":
-                    prop_D = len(true_ans_D) / Oracle_dist.shape[0]
-                    print(f"the GT proportion is {(prop_D)}")
-
-                for sample_size in sample_size_list:
-                    print(f"sample size: {sample_size}")
-                    acc_l = []
-                    agg_S_l = []
-                    NN_S_l = []
-                    CI_S_l = []
-
-                    for sample_ind in range(num_sample):
-                        np.random.seed(seed * sample_ind)
-                        one_sample_start = time.time()
-
-                        indices = np.random.choice(
-                            Oracle_dist.shape[0], sample_size, replace=False
-                        )
-                        oracle_dist_S = Oracle_dist[indices]
-                        proxy_dist_S = Proxy_dist[indices]
-
-                        S_size = oracle_dist_S.shape[0]
-
-                        true_ans_S = np.where(oracle_dist_S <= Dist_t)[0]
-                        if hypothesis_type == "NNH":
-                            S_attr = [D_attr[i] for i in indices]
-                            l_S, agg_S = agg_value(S_attr, true_ans_S, attr_id, agg)
-                            print(
-                                f"The number of NN in S is {len(true_ans_S)} ({len(true_ans_S)/proxy_dist_S.shape[0]}%), the aggregated value is {agg_S}"
-                            )
-                        elif hypothesis_type == "P-NNH":
-                            prop_S = round(true_ans_S.shape[0] / S_size, 4)
-                            print(
-                                f"prop_S at {sample_ind}-th sample is: ",
-                                prop_S,
-                            )
-
-                        NN_S = len(true_ans_S)
-                        time_one_sample = time.time() - one_sample_start
-
-                        for fac in fac_list:
-                            if hypothesis_type == "NNH":
-                                c_time_GT = agg_D * fac
-                                # print(f">>> c is {c_time_GT}")
-
-                                _, GT, GT_CI_l, GT_CI_h = HT_acc_t_test(
-                                    l_D, c_time_GT, H1_op, is_D=True
-                                )
-
-                                # print(f"the ground truth to reject H0 result is : {GT}")
-                                align_S, rej_S, CI_l_S, CI_h_S = HT_acc_t_test(
-                                    l_S, c_time_GT, H1_op, GT=GT, is_D=False
-                                )
-                                acc_l.append(True)
-                                agg_S_l.append(abs(agg_S - agg_D))
-                                CI_S_l.append(0)
-                                NN_S_l.append(NN_S)
-                            elif hypothesis_type == "P-NNH":
-                                c_time_GT = (
-                                    len(true_ans_D) / Oracle_dist.shape[0]
-                                ) * fac
-                                print(f">>> c is {c_time_GT}")
-                                _, _, GT = one_proportion_z_test(
-                                    len(true_ans_D),
-                                    Oracle_dist.shape[0],
-                                    c_time_GT,
-                                    0.05,
-                                    H1_op,
-                                )
-                                print(f"the ground truth to reject H0 result is : {GT}")
-                                align, reject = HT_acc_prop(
-                                    "RNS",
-                                    true_ans_S,
-                                    S_size,
-                                    H1_op,
-                                    GT,
-                                    c_time_GT,
-                                )
-                                acc_l.append(align)
-                                agg_S_l.append(prop_S)
-                                CI_S_l.append(np.nan)
-                                NN_S_l.append(NN_S)
-
-                    backup_res = [
-                        seed,
-                        sample_size,
-                        round(np.nanmean(NN_S_l), 4),
-                        round(np.nanmean(agg_S_l), 4),
-                        round(np.nanmean(CI_S_l), 4),
-                        round(np.nanmean(acc_l), 4),
-                    ]
+            # Process samples
+            for sample_size in [cost]:
+                verbose_print(args, f"sample size: {sample_size}")
+                results = process_sample(
+                    args,
+                    seed,
+                    Oracle_dist,
+                    args.true_ans_D,
+                    sample_size,
+                    H1_op,
+                    D_attr if args.hypothesis_type == "NNH" else None,
+                )
+                if args.save:
                     with open(
                         save_path,
                         "a",
                     ) as file:
-                        results_str = "\t".join(map(str, backup_res)) + "\n"
+                        results_str = "\t".join(map(str, results)) + "\n"
                         file.write(results_str)
-                    # results_str = "\t".join(map(str, backup_res))
-                    # print(results_str)
+                else:
+                    results_str = "\t".join(map(str, results))
+                    print(results_str)
 
-    end_time = time.time()
-    print("execution time is %.2fs" % (end_time - start_time))
+    print("execution time is %.2fs" % (time.time() - start_time))
+
+
+if __name__ == "__main__":
+    main()
