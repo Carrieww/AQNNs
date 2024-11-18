@@ -1,23 +1,23 @@
+import time
+import numpy as np
 from math import floor
-from scipy import stats
+from pathlib import Path
 from scipy.stats import norm
 from config import parse_args
-
-from aquapro_util import (
-    load_data,
-    preprocess_dist,
-    preprocess_topk_phi,
-)
-from aquapro_util import array_union, set_diff, preprocess_sync
-
-from numba import njit
 from hyper_parameter import norm_scale
-import numpy as np
+from aquapro_util import (
+    prepare_distances,
+    agg_value,
+    get_data,
+    load_data,
+    preprocess_topk_phi,
+    verbose_print,
+    array_union,
+    set_diff,
+)
+from HT_test import HT_acc_t_test, one_proportion_z_test, HT_acc_z_test
 
-import pickle
-from pathlib import Path
-
-import time
+# from numba import njit
 
 
 # @njit
@@ -119,77 +119,12 @@ def test_PQE_RT(args, oracle_dist, proxy_dist, rt):
         topk,
         rt=rt,
     )
-    print(
-        f"true precision is {precision}, true recall is {recall}, and the precision for fixed sample is {fix_prec}, and recall for fixed sample is {fix_rec}"
+    verbose_print(
+        args,
+        f"true precision is {precision}, true recall is {recall}, and the precision for fixed sample is {fix_prec}, and recall for fixed sample is {fix_rec}",
     )
 
     return precision, recall, _, ans, fix_prec, fix_rec
-
-
-def HT_acc_z_test(args, name, ans, total, GT, prop_c, H1_op):
-    if args.verbose:
-        print(f"finished {name} algorithm for q")
-        print(f"FRNN result: {len(ans)}")
-        print(f"total patients: {total}")
-        print(f"c proportion: {prop_c}; approx: {len(ans) / total}")
-
-    z_stat, p_value, reject = one_proportion_z_test(
-        len(ans), total, prop_c, 0.05, H1_op
-    )
-
-    if args.verbose:
-        print("Z-Statistic:", z_stat)
-        print("P-Value:", p_value)
-        print("Reject Null Hypothesis:", reject)
-
-    align = reject == GT
-
-    if args.verbose:
-        print("align:", align)
-
-    return align, reject
-
-
-def one_proportion_z_test(
-    successes, total_trials, null_prop, alpha=0.05, alternative="two-sided"
-):
-    """
-    Perform a one-proportion z-test.
-
-    Parameters:
-    - successes: Number of successes.
-    - total_trials: Total number of trials.
-    - null_prop: The hypothesized population proportion under the null hypothesis.
-    - alpha: Significance level (default is 0.05).
-    - alternative: The alternative hypothesis ('two-sided', 'less', or 'greater'). Default is 'two-sided'.
-
-    Returns:
-    - z_stat: The z-statistic.
-    - p_value: The p-value.
-    - rejection: True if the null hypothesis is rejected, False otherwise.
-    """
-
-    # Calculate sample proportion
-    sample_prop = successes / total_trials
-
-    # Calculate standard error
-    std_error = (null_prop * (1 - null_prop) / total_trials) ** 0.5
-
-    # Calculate z-statistic
-    z_stat = (sample_prop - null_prop) / std_error
-
-    # Calculate p-value
-    if alternative == "two-sided":
-        p_value = 2 * (1 - norm.cdf(abs(z_stat)))
-    elif alternative == "less":
-        p_value = norm.cdf(z_stat)
-    elif alternative == "greater":
-        p_value = 1 - norm.cdf(z_stat)
-
-    # Determine rejection of null hypothesis
-    reject = p_value < alpha
-
-    return z_stat, p_value, reject
 
 
 def PQE_better(
@@ -221,7 +156,7 @@ def PQE_better(
         proxy_dist_S = Proxy_dist[indices]
         args.true_ans_S = np.where(oracle_dist_S <= args.Dist_t)[0]
         args.NN_S = len(args.true_ans_S)
-        print(f"Find NN in S is {args.NN_S}")
+        verbose_print(args, f"Find NN in S is {args.NN_S}")
 
         if args.hypothesis_type == "P-NNH":
             args.agg_S = len(args.true_ans_S) / oracle_dist_S.shape[0]
@@ -233,18 +168,20 @@ def PQE_better(
             _, args.agg_S_full = agg_value(
                 args.S_attr, range(len(args.S_attr)), args.attr_id, args.agg
             )
-            print(
-                f"The number of NN in S is {len(args.true_ans_S)} ({len(args.true_ans_S)/proxy_dist_S.shape[0]}%), the aggregation of true NN is {args.agg_S} and the aggregated value of all data in S is {args.agg_S_full}"
+            verbose_print(
+                args,
+                f"The number of NN in S is {len(args.true_ans_S)} ({len(args.true_ans_S)/proxy_dist_S.shape[0]}%), the aggregation of true NN is {args.agg_S} and the aggregated value of all data in S is {args.agg_S_full}",
             )
-        # pilot sample
+
+        # prepare pilot sample
         args.fix_sample = np.random.choice(
             len(oracle_dist_S), size=int(args.initial_cost), replace=False
         )
-
         available_indices = np.setdiff1d(np.arange(len(oracle_dist_S)), args.fix_sample)
         args.available_oracle_dist_S = oracle_dist_S[available_indices]
         args.available_proxy_dist_S = proxy_dist_S[available_indices]
 
+        # no probe sample
         args.est_scale = norm_scale
         args.samples = None
 
@@ -252,15 +189,16 @@ def PQE_better(
         args.rt, CANNOT = find_optimal_rt(args, oracle_dist_S, proxy_dist_S)
         args.optimal_cost = args.initial_cost  # + args.probe_cost
 
+        # find NN by SPRinT
         RT_precision, RT_recall, _, RT_ans, fix_prec, fix_rec = test_PQE_RT(
             args, oracle_dist_S, proxy_dist_S, args.rt
         )
-
         args.NN_RT = len(RT_ans)
-
-        print(
-            f"recall: {RT_recall}, prcision: {RT_precision}, at cost {args.optimal_cost}, fix prec: {fix_prec}, fix recall: {fix_rec}"
+        verbose_print(
+            args,
+            f"recall: {RT_recall}, prcision: {RT_precision} at cost {args.optimal_cost}, fix prec: {fix_prec}, fix recall: {fix_rec}",
         )
+
         recall_l.append(RT_recall)
         precision_l.append(RT_precision)
         fix_prec_l.append(fix_prec)
@@ -268,13 +206,14 @@ def PQE_better(
 
         if args.hypothesis_type == "P-NNH":
             approx_agg_S = round(len(RT_ans) / proxy_dist_S.shape[0], 4)
-            print(f"the prop is {approx_agg_S}")
+            verbose_print(args, f"the prop is {approx_agg_S}")
         elif args.hypothesis_type == "NNH":
             approx_l_S, approx_agg_S = agg_value(
                 args.S_attr, RT_ans, args.attr_id, args.agg
             )
-            print(
-                f"The number of NN by SPRinT is {len(RT_ans)} ({len(RT_ans)/proxy_dist_S.shape[0]}%), the approximated aggregated value is {approx_agg_S}"
+            verbose_print(
+                args,
+                f"The number of NN by SPRinT is {len(RT_ans)} ({len(RT_ans)/proxy_dist_S.shape[0]}%), the approximated aggregated value is {approx_agg_S}",
             )
             if (RT_precision + RT_recall) == 0:
                 approx_f1 = 0
@@ -289,8 +228,8 @@ def PQE_better(
             for H1_op in ["greater", "less"]:
                 if args.hypothesis_type == "P-NNH":
                     c_time_GT = (len(args.true_ans_D) / Oracle_dist.shape[0]) * fac
-                    if args.verbose:
-                        print(f">>> c is {c_time_GT}")
+                    verbose_print(args, f">>> c is {c_time_GT}")
+
                     _, _, GT = one_proportion_z_test(
                         len(args.true_ans_D),
                         Oracle_dist.shape[0],
@@ -298,8 +237,10 @@ def PQE_better(
                         0.05,
                         H1_op,
                     )
-                    if args.verbose:
-                        print(f"the ground truth to reject H0 result is : {GT}")
+                    verbose_print(
+                        args, f"the ground truth to reject H0 result is : {GT}"
+                    )
+
                     rt_align, _ = HT_acc_z_test(
                         args,
                         "PQE-RT",
@@ -313,18 +254,24 @@ def PQE_better(
 
                 elif args.hypothesis_type == "NNH":
                     c_time_GT = args.agg_D * fac
-                    # print(f">>> c is {c_time_GT}")
+                    verbose_print(args, f">>> c is {c_time_GT}")
 
-                    _, GT, _, _ = HT_acc_t_test(args.l_D, c_time_GT, H1_op, is_D=True)
-
-                    # print(f"the ground truth to reject H0 result is : {GT}")
-                    rt_align, _, rt_CI_l, rt_CI_h = HT_acc_t_test(
-                        approx_l_S, c_time_GT, H1_op, GT=GT, is_D=False
+                    _, GT, _, _ = HT_acc_t_test(
+                        args, args.l_D, c_time_GT, H1_op, is_D=True
                     )
+                    verbose_print(
+                        args, f"the ground truth to reject H0 result is : {GT}"
+                    )
+
+                    rt_align, _, rt_CI_l, rt_CI_h = HT_acc_t_test(
+                        args, approx_l_S, c_time_GT, H1_op, GT=GT, is_D=False
+                    )
+
                     acc_l.append(rt_align)
                     CI_l.append(rt_CI_h - rt_CI_l)
                     f1_l.append(approx_f1)
                     fix_f1_l.append(approx_fix_f1)
+
         agg_l.append(approx_agg_S)
         agg_S_l.append(args.agg_S)
         NN_S_l.append(args.NN_S)
@@ -339,15 +286,24 @@ def PQE_better(
     avg_NN_S = np.nanmean(NN_S_l)
     avg_NN_RT = np.nanmean(NN_RT_l)
     cannot_times = np.nanmean(cannot_times_l)
-    print(
-        f"the average accuracy over {args.num_sample} runs and {args.fac_list} is {avg_acc}"
+    verbose_print(
+        args,
+        f"the average accuracy over {args.num_sample} runs and {args.fac_list} is {avg_acc}",
     )
-    print(f"the average recall over {args.num_sample} is {avg_recall}")
-    print(f"the average precision over {args.num_sample} is {avg_precision}")
-    print(f"the average fix recall over {args.num_sample} is {avg_fix_rec}")
-    print(f"the average fix precision over {args.num_sample} is {avg_fix_prec}")
-    print(f"the average NN in S over {args.num_sample} is {avg_NN_S}")
-    print(f"the average NN by SPRinT in S over {args.num_sample} is {avg_NN_RT}")
+    verbose_print(args, f"the average recall over {args.num_sample} is {avg_recall}")
+    verbose_print(
+        args, f"the average precision over {args.num_sample} is {avg_precision}"
+    )
+    verbose_print(
+        args, f"the average fix recall over {args.num_sample} is {avg_fix_rec}"
+    )
+    verbose_print(
+        args, f"the average fix precision over {args.num_sample} is {avg_fix_prec}"
+    )
+    verbose_print(args, f"the average NN in S over {args.num_sample} is {avg_NN_S}")
+    verbose_print(
+        args, f"the average NN by SPRinT in S over {args.num_sample} is {avg_NN_RT}"
+    )
 
     avg_agg = np.nanmean(agg_l)
     var_agg = np.nanvar(agg_l)
@@ -355,8 +311,9 @@ def PQE_better(
     var_agg_S = np.nanvar(agg_S_l)
 
     if args.hypothesis_type == "P-NNH":
-        print(
-            f"the average prop_S over {args.num_sample} is {avg_agg} with variance {round(var_agg,4)}"
+        verbose_print(
+            args,
+            f"the average prop_S over {args.num_sample} is {avg_agg} with variance {round(var_agg,4)}",
         )
         return (
             avg_acc,
@@ -379,16 +336,19 @@ def PQE_better(
         avg_CI = np.mean(CI_l)
         avg_f1 = np.mean(f1_l)
         avg_fix_f1 = np.mean(fix_f1_l)
-        print(
-            f"the average aggregate value over {args.num_sample} is {avg_agg} with variance {round(var_agg,4)}"
+        verbose_print(
+            args,
+            f"the average aggregate value over {args.num_sample} is {avg_agg} with variance {round(var_agg,4)}",
         )
-        print(
-            f"the average aggregate value in S over {args.num_sample} is {avg_agg_S} with variance {round(var_agg_S,4)}"
+        verbose_print(
+            args,
+            f"the average aggregate value in S over {args.num_sample} is {avg_agg_S} with variance {round(var_agg_S,4)}",
         )
-        print(f"the average CI over {args.num_sample} is {avg_CI}")
-        # print(f"the average upper CI value over {args.num_sample} is {avg_CI_h}")
-        print(f"the average f1 score over {args.num_sample} is {avg_f1}")
-        print(f"the average fix f1 score over {args.num_sample} is {avg_fix_f1}")
+        verbose_print(args, f"the average CI over {args.num_sample} is {avg_CI}")
+        verbose_print(args, f"the average f1 score over {args.num_sample} is {avg_f1}")
+        verbose_print(
+            args, f"the average fix f1 score over {args.num_sample} is {avg_fix_f1}"
+        )
         return (
             avg_acc,
             avg_recall,
@@ -445,95 +405,15 @@ def process_results_NNH(
             file.write(
                 f"{seed:.4f}\t{args.optimal_cost:.4f}\t{None}\t{avg_acc:.4f}\t{avg_recall:.4f}\t{avg_precision:.4f}\t{avg_f1:.4f}\t{avg_fix_rec:.4f}\t{avg_fix_prec:.4f}\t{avg_fix_f1:.4f}\t{avg_agg:.4f}\t{var_agg:.4f}\t{avg_NN_RT:.4f}\t{avg_agg_S:.4f}\t{var_agg_S:.4f}\t{avg_NN_S:.4f}\t{avg_CI:.4f}\n"
             )
-    print(
-        f"At recall target={args.recall_target} and precision target={args.precision_target}; we find optimal cost={args.optimal_cost} and optimal rt={args.rt}"
+    verbose_print(
+        args,
+        f"At recall target={args.recall_target} and precision target={args.precision_target}; we find optimal cost={args.optimal_cost} and optimal rt={args.rt}",
     )
-    print(
-        f"avg acc: {avg_acc}, avg recall: {avg_recall}, avg precision: {avg_precision}, avg fix recall: {avg_fix_rec}, avg precision: {avg_fix_prec}"
+    verbose_print(
+        args,
+        f"avg acc: {avg_acc}, avg recall: {avg_recall}, avg precision: {avg_precision}, avg fix recall: {avg_fix_rec}, avg precision: {avg_fix_prec}",
     )
-    end_time = time.time()
-    print("execution time is %.2fs" % (end_time - args.start_time))
-
-
-def get_data(filename=None, is_text=False):
-    if is_text:
-        instance_list = (np.loadtxt(filename) >= 0).astype(int)
-    else:
-        instance_list = pickle.load(open(filename, "rb"), encoding="latin1")
-
-    return instance_list
-
-
-def is_int(string):
-    try:
-        int(string)
-        return True
-    except ValueError:
-        return False
-
-
-def agg_value(D, ind_list, attr_id, agg):
-    l = []
-    for ans_id in ind_list:
-        value = D[ans_id][2][attr_id]
-        if is_int(value):
-            value = int(value)
-            if not np.isnan(value):
-                l.append(int(value))
-        else:
-            pass
-
-    if agg == "mean":
-        res = sum(l) / len(l)
-    else:
-        raise Exception(f"The case for {agg} has not been implemented yet")
-    return l, res
-
-
-def HT_acc_t_test(l, c, operator, GT=None, is_D=False):
-    t_stat, p_value, rejectH0, CI_l, CI_h = one_sample_t_test(
-        l, c, alternative=operator
-    )
-
-    print("T-Statistic:", t_stat)
-    print("P-Value:", p_value)
-
-    if is_D:
-        align = True
-        print(f"The ans in D to reject H0 result is : {rejectH0}")
-        print("align with ground truth?", align)
-
-    else:
-        print(f"The ans to reject H0 result is : {rejectH0}")
-        assert GT is not None, "GT is None"
-        align = rejectH0 == GT
-        print("align with ground truth?", align)
-
-    return align, rejectH0, CI_l, CI_h
-
-
-def one_sample_t_test(l, c, alpha=0.05, alternative="two-sided"):
-    global rejectH0
-    t_stat, p_value = stats.ttest_1samp(l, popmean=c, alternative=alternative)
-    CI_lower, CI_upper = stats.t.interval(
-        confidence=1 - alpha,
-        df=len(l) - 1,
-        loc=np.mean(l),
-        scale=stats.sem(l),
-    )
-
-    if p_value < alpha:
-        rejectH0 = True
-        print(
-            f"The test (c = {c}, op = {alternative}) is significant, we shall reject the null hypothesis."
-        )
-    elif p_value >= alpha:
-        rejectH0 = False
-        print(
-            f"The test (c = {c}, op = {alternative}) is NOT significant, we shall accept the null hypothesis."
-        )
-    print(f"confidence interval is ({round(CI_lower,4), round(CI_upper,4)})")
-    return t_stat, p_value, rejectH0, CI_lower, CI_upper
+    verbose_print(args, "execution time is %.2fs" % (time.time() - args.start_time))
 
 
 def find_optimal_rt(args, oracle_dist_S, proxy_dist_S, rt=0.1):
@@ -545,7 +425,7 @@ def find_optimal_rt(args, oracle_dist_S, proxy_dist_S, rt=0.1):
         RT_fix_prec = 0
         while abs(RT_fix_rec - RT_fix_prec) > 0.01:
             rt = (max_t + min_t) / 2
-            print(f"---------- finding rt: {rt} ----------")
+            verbose_print(args, f"---------- finding rt: {rt} ----------")
             (
                 RT_precision,
                 RT_recall,
@@ -560,11 +440,12 @@ def find_optimal_rt(args, oracle_dist_S, proxy_dist_S, rt=0.1):
                 max_t = rt
 
             if abs(min_t - max_t) < 0.001:
-                print("CANNOT find optimal rt!!")
+                verbose_print(args, "CANNOT find optimal rt!!")
                 CANNOT = 1
                 break
-            print(
-                f"rt = {rt}: Found NN: {len(RT_ans)}, Precision {RT_precision}, Recall {RT_recall}, Pilot Precision {RT_fix_prec}, Pilot Recall {RT_fix_rec}"
+            verbose_print(
+                args,
+                f"rt = {rt}: Found NN: {len(RT_ans)}, Precision {RT_precision}, Recall {RT_recall}, Pilot Precision {RT_fix_prec}, Pilot Recall {RT_fix_rec}",
             )
 
         optimal_t = rt
@@ -573,7 +454,7 @@ def find_optimal_rt(args, oracle_dist_S, proxy_dist_S, rt=0.1):
     elif args.hypothesis_type == "NNH":
         max_f1 = 0
         while rt <= 1:
-            print(f"---------- finding rt: {rt} ----------")
+            verbose_print(args, f"---------- finding rt: {rt} ----------")
             (
                 RT_precision,
                 RT_recall,
@@ -586,77 +467,76 @@ def find_optimal_rt(args, oracle_dist_S, proxy_dist_S, rt=0.1):
                 RT_F1 = 0
             else:
                 RT_F1 = RT_fix_prec * RT_fix_rec * 2 / (RT_fix_prec + RT_fix_rec)
-            print(f"Found NN: {len(RT_ans)}, with F1 score: {RT_F1}")
+            verbose_print(args, f"Found NN: {len(RT_ans)}, with F1 score: {RT_F1}")
 
             if RT_F1 >= max_f1:
                 max_f1 = RT_F1
                 optimal_t = rt
             rt += 0.01
 
-    print(
-        f"Found optimal recall target={optimal_t}, we achieve recall {RT_recall} and precision: {RT_precision}, fix precision: {RT_fix_prec} and fix recall: {RT_fix_rec}"
+    verbose_print(
+        args,
+        f"Found optimal recall target={optimal_t}, we achieve recall {RT_recall} and precision: {RT_precision}, fix precision: {RT_fix_prec} and fix recall: {RT_fix_rec}",
     )
     return optimal_t, CANNOT
 
 
 if __name__ == "__main__":
+    # Parse arguments and initialize
     args = parse_args()
     args.start_time = time.time()
+
+    # Load data
+    Proxy_emb, Oracle_emb = load_data(args)
     args.fac_list = np.arange(
         float(args.fac_list.split(",")[0]),
         float(args.fac_list.split(",")[1]),
         float(args.fac_list.split(",")[2]),
     )
-    print(args.fac_list)
-    print(
-        f"Dataset: {args.Fname}, initial_cost: {args.initial_cost}, total_cost: {args.total_cost}, method: {args.hypothesis_type}, assumption: {args.PQA}"
+
+    verbose_print(args, f"Prob: {args.Prob}; r: {args.Dist_t}")
+    verbose_print(
+        args,
+        f"Dataset: {args.Fname}, method: {args.hypothesis_type}, assumption: {args.PQA}, version: {args.version}, cost: {args.total_cost}",
     )
 
-    Path(f"./results/SPRinT_{args.PQA}/").mkdir(parents=True, exist_ok=True)
-
+    # Handle hypothesis-specific setup
     if args.hypothesis_type == "NNH":
         args.D_attr = get_data(
-            filename=f"data/medical/{args.Fname}/" + args.Fname + ".testfull"
+            filename=f"data/medical/{args.Fname}/{args.Fname}.testfull"
         )
         args.agg = "mean"
-        args.subject = "of NNs of q"
-        print(f"Prob: {args.Prob}; r: {args.Dist_t}")
-        print(f"H1: {args.agg} {args.attr} {args.subject}")
+        verbose_print(args, f"H1: {args.agg} {args.attr} of NNs of q is tested.")
+    elif args.hypothesis_type == "P-NNH":
+        args.attr = "proportion"
 
-    Proxy_emb, Oracle_emb = load_data(args)
+    # Prepare output path
+    Path(f"./results/SPRinT_{args.PQA}/").mkdir(parents=True, exist_ok=True)
 
-    for seed in range(1, 11):
+    for seed in range(1, 2):
         args.optimal_cost = None
-        print(f"*********************** start seed {seed} ***********************")
         np.random.seed(seed)
 
-        # prepare data embedding, dist to q, and ground truth
-        Index = np.random.choice(
+        verbose_print(
+            args, f"*********************** start seed {seed} ***********************"
+        )
+        # get oracle ground truth NN and agg
+        query_indices = np.random.choice(
             range(len(Oracle_emb)), size=args.num_query, replace=False
         )
-
-        Proxy_dist, Oracle_dist = preprocess_dist(
-            Oracle_emb, Proxy_emb, Oracle_emb[[Index[0]]]
+        Oracle_dist, Proxy_dist = prepare_distances(
+            args, Oracle_emb, Proxy_emb, query_indices
         )
-        if args.PQA == "PQA":
-            Oracle_dist = preprocess_sync(Proxy_dist, norm_scale)
 
-        if args.hypothesis_type == "P-NNH":
-            args.true_ans_D = np.where(Oracle_dist <= args.Dist_t)[0]
-            args.agg_D = len(args.true_ans_D) / Oracle_dist.shape[0]
-            print(f"the GT proportion is {(args.agg_D)}")
-        elif args.hypothesis_type == "NNH":
-            args.true_ans_D = np.where(Oracle_dist <= args.Dist_t)[0]
+        args.true_ans_D = np.where(Oracle_dist <= args.Dist_t)[0]
+        if args.hypothesis_type == "NNH":
             args.l_D, args.agg_D = agg_value(
                 args.D_attr, args.true_ans_D, args.attr_id, args.agg
             )
-
-            _, args.agg_D_full = agg_value(
-                args.D_attr, range(len(args.D_attr)), args.attr_id, args.agg
-            )
-            print(
-                f"The number of NN in D is {len(args.true_ans_D)} ({len(args.true_ans_D)/Proxy_dist.shape[0]}%), the GT aggregated value of NN is {args.agg_D} and the aggregated value in D is {args.agg_D_full}"
-            )
+            verbose_print(args, f"Ground Truth Aggregation: {args.agg_D}")
+        elif args.hypothesis_type == "P-NNH":
+            args.prop_D = len(args.true_ans_D) / Oracle_dist.shape[0]
+            verbose_print(args, f"Ground Truth Proportion: {args.prop_D}")
 
         # rerun algo for 30 times for average results
         (
