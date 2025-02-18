@@ -3,10 +3,10 @@
 /data/Amazon/*.py
 /data/Amazon/*.sh
 /data/Housing_price
-/data/Medical/icd9_eICU/eicu-collaborative-research-database-2
-/data/Medical/icd9_eICU/eicu-collaborative-research-database-2.0.zip
-/data/Medical/icd9_mimic/mimic-iii-clinical-database-1.4.zip
-/data/Medical/icd9_mimic/mimic-iii-clinical-database-1-4
+/data/Medical/eICU/eicu-collaborative-research-database-2
+/data/Medical/eICU/eicu-collaborative-research-database-2.0.zip
+/data/Medical/MIMIC-III/mimic-iii-clinical-database-1.4.zip
+/data/Medical/MIMIC-III/mimic-iii-clinical-database-1-4
 /data/Video/*.ipynb
 /data/Video/jackson10000_attribute.csv
 /data/README.md

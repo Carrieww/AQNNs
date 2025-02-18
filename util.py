@@ -1,3 +1,4 @@
+import time
 import scipy
 import pickle
 import numpy as np
@@ -152,7 +153,7 @@ def agg_value(D, ind_list, attr_id, agg):
             res = np.nan
         else:
             mean = sum(l) / len(l)
-            res = sum((x - mean) ** 2 for x in l) / len(l)  # Population variance
+            res = sum((x - mean) ** 2 for x in l) / len(l)
     else:
         raise Exception(f"The case for {agg} has not been implemented yet")
     return l, res

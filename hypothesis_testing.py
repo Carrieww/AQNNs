@@ -1,7 +1,7 @@
 from scipy.stats import norm
 from scipy import stats
 import numpy as np
-from aquapro_util import verbose_print
+from util import verbose_print
 
 
 def HT_acc_z_test(args, name, ans, total, GT, prop_c, H1_op):
@@ -78,11 +78,11 @@ def one_sample_t_test(args, l, c, alpha=0.05, alternative="two-sided"):
         scale=stats.sem(l),
     )
     rejectH0 = p_value < alpha
-    verbose_print(
-        args,
-        f"The test (c = {c}, op = {alternative}) is significant, we shall {rejectH0} reject the null hypothesis.",
-    )
-    verbose_print(
-        args, f"confidence interval is ({round(CI_lower,4), round(CI_upper,4)})"
-    )
+    # verbose_print(
+    #     args,
+    #     f"The test (c = {c}, op = {alternative}) is significant, we shall {rejectH0} reject the null hypothesis.",
+    # )
+    # verbose_print(
+    #     args, f"confidence interval is ({round(CI_lower,4), round(CI_upper,4)})"
+    # )
     return t_stat, p_value, rejectH0, CI_lower, CI_upper

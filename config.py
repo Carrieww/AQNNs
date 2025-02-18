@@ -6,8 +6,8 @@ ROOT_DIR = Path(__file__).parent
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Model parameters")
-    parser.add_argument("--s_p", type=int, default=2000, help="Pilot sample size.")
-    parser.add_argument("--s", type=int, default=3000, help="Sample size.")
+    parser.add_argument("--s_p", type=int, default=600, help="Pilot sample size.")
+    parser.add_argument("--s", type=int, default=1000, help="Sample size.")
     parser.add_argument(
         "--hypothesis_type",
         type=str,
@@ -37,7 +37,7 @@ def parse_args():
         help="Choose an aggregation function.",
     )
     parser.add_argument(
-        "--attr", type=str, default="ratings", help="attribute name in the hypothesis."
+        "--attr", type=str, default="age", help="attribute name in the hypothesis."
     )
     parser.add_argument(
         "--attr_id",
@@ -46,12 +46,12 @@ def parse_args():
         help="the id of the attribute stored in the database.",
     )
     parser.add_argument(
-        "--file_suffix", type=str, default="test0214", help="log filename."
+        "--file_suffix", type=str, default="test", help="log filename."
     )
     parser.add_argument(
         "--Fname",
         type=str,
-        default="Amazon-HH",
+        default="eICU",
         choices=[
             "eICU",
             "MIMIC-III",

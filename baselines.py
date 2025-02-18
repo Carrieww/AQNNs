@@ -7,7 +7,7 @@ from scipy.integrate import quad
 from hyper_parameter import std_offset
 from supg.supg.selector import ApproxQuery
 from supg.supg.experiments.experiment import run_experiment
-from aquapro_util import array_union, set_diff, preprocess_topk_phi, verbose_print
+from util import array_union, set_diff, preprocess_topk_phi, verbose_print
 
 
 def test_PQE(args, oracle_dist, proxy_dist, variant, variant_value):

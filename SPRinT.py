@@ -19,7 +19,7 @@ from util import (
     output_results,
     compute_f1_score,
 )
-from Hypothesis_testing import HT_acc_t_test, one_proportion_z_test, HT_acc_z_test
+from hypothesis_testing import HT_acc_t_test, one_proportion_z_test, HT_acc_z_test
 from baselines import (
     test_topk,
     test_PQE,
@@ -440,7 +440,7 @@ def run_experiment(
 
 
 def f1_score(args, t, oracle_dist_S, proxy_dist_S):
-    _, fix_prec, fix_rec = test_SPRinT(args, oracle_dist_S, proxy_dist_S, t)
+    _,_,_,_, fix_prec, fix_rec = test_SPRinT(args, oracle_dist_S, proxy_dist_S, t)
     if fix_prec + fix_rec == 0:
         return 0
     else:
@@ -458,7 +458,7 @@ def find_optimal_rt(args, oracle_dist_S, proxy_dist_S, rt=0.0001):
             rt = (max_t + min_t) / 2
             verbose_print(args, f"---------- finding rt: {rt} ----------")
 
-            ans, fix_prec, fix_rec = test_SPRinT(args, oracle_dist_S, proxy_dist_S, rt)
+            _,_,_,ans, fix_prec, fix_rec = test_SPRinT(args, oracle_dist_S, proxy_dist_S, rt)
 
             if fix_prec < fix_rec:
                 min_t = rt
