@@ -5,22 +5,22 @@ from aquapro_util import verbose_print
 
 
 def HT_acc_z_test(args, name, ans, total, GT, prop_c, H1_op):
-    verbose_print(args, f"start {name} algorithm for q")
-    verbose_print(args, f"FRNN result: {len(ans)}")
-    verbose_print(args, f"total patients: {total}")
-    verbose_print(args, f"c proportion: {prop_c}; approx: {len(ans) / total}")
+    # verbose_print(args, f"start {name} algorithm for q")
+    # verbose_print(args, f"FRNN result: {len(ans)}")
+    # verbose_print(args, f"total patients: {total}")
+    # verbose_print(args, f"c proportion: {prop_c}; approx: {len(ans) / total}")
 
     z_stat, p_value, reject = one_proportion_z_test(
         len(ans), total, prop_c, 0.05, H1_op
     )
 
-    verbose_print(
-        args,
-        f"Z-Statistic: {z_stat}, P-Value: {p_value}, Reject Null Hypothesis: {reject}",
-    )
+    # verbose_print(
+    #     args,
+    #     f"Z-Statistic: {z_stat}, P-Value: {p_value}, Reject Null Hypothesis: {reject}",
+    # )
 
     align = reject == GT
-    verbose_print(args, f"align: {align}")
+    # verbose_print(args, f"align: {align}")
 
     return align, reject
 
@@ -55,16 +55,16 @@ def HT_acc_t_test(args, l, c, operator, GT=None, is_D=False):
     t_stat, p_value, rejectH0, CI_l, CI_h = one_sample_t_test(
         args, l, c, alternative=operator
     )
-    verbose_print(args, f"t_stat: {t_stat}, p_value: {p_value}")
+    # verbose_print(args, f"t_stat: {t_stat}, p_value: {p_value}")
 
     if is_D:
         align = True
-        verbose_print(args, f"The ans in D to reject H0 result is : {rejectH0}")
+        # verbose_print(args, f"The ans in D to reject H0 result is : {rejectH0}")
 
     else:
         assert GT is not None, "GT is None"
         align = rejectH0 == GT
-        verbose_print(args, f"The ans in S to reject H0 result is : {rejectH0}")
+        # verbose_print(args, f"The ans in S to reject H0 result is : {rejectH0}")
 
     return align, rejectH0, CI_l, CI_h
 

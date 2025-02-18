@@ -1,11 +1,13 @@
 import time
 import numpy as np
-from math import floor
+from numba import njit
 from pathlib import Path
-from scipy.stats import norm
+from math import ceil
 from config import parse_args
-from hyper_parameter import norm_scale
-from aquapro_util import (
+import copy
+import pandas as pd
+from hyper_parameter import norm_scale, std_offset
+from util import (
     prepare_distances,
     agg_value,
     get_data,
@@ -14,111 +16,96 @@ from aquapro_util import (
     verbose_print,
     array_union,
     set_diff,
+    output_results,
+    compute_f1_score,
 )
-from HT_test import HT_acc_t_test, one_proportion_z_test, HT_acc_z_test
+from Hypothesis_testing import HT_acc_t_test, one_proportion_z_test, HT_acc_z_test
+from baselines import (
+    test_topk,
+    test_PQE,
+    SUPG,
+)
 
-# from numba import njit
 
-
-# @njit
-def test_PQA_RT(
-    args,
-    oracle_dist,
-    phi,
-    topk,
-    rt=0.9,
-):
-    true_ans = np.where(oracle_dist <= args.Dist_t)[0]
+@njit
+def SPRinT(Dist_t, Prob, fix_sample, oracle_dist, phi, topk, pt=0.9, pilots=None):
+    true_ans = np.where(oracle_dist <= Dist_t)[0]
     if len(true_ans) == 0:
-        return 0, 0, len(oracle_dist), np.empty(0, dtype=np.int64), None, None
+        return 0, 0, 0, np.empty(0, dtype=np.int64), 0, 0
 
-    L = 1
-    R = len(phi)
-
-    def pb_distribution(phii, p):
-        for j in range(1, len(phii) + 1):
-            if j == 1:
-                p[0] = 1 - phii[0]
-                p[1] = phii[0]
-            else:
-                shift_p = np.roll(p, 1) * phii[j - 1]
-                p = p * (1 - phii[j - 1]) + shift_p
-
-        return p
-
-    while L < R:
-        mid = floor((L + R) / 2)
-
-        pbs = pb_distribution(phi[:mid], np.zeros(len(phi) + 1))
-        pbc = pb_distribution(phi[mid:], np.zeros(len(phi) + 1))
-
-        recall_prob = 0
-        for i in range(mid + 1):
-            cdf = np.sum(pbc[: floor((1 - rt) * i / rt) + 1])
-            recall_prob += pbs[i] * cdf
-
-        if recall_prob < args.Prob:
-            L = mid + 1
-        else:
-            R = mid
-
-    k_star = L
-    max_exp = 0
     pbs = np.zeros(len(phi) + 1)
+    k_star = 0
 
-    for i in range(L, len(phi) + 1):
-        if i == L:
-            pbs = pb_distribution(phi[:L], np.zeros(len(phi) + 1))
+    for i in range(1, len(phi) + 1):
+        if i == 1:
+            pbs[0] = 1 - phi[0]
+            pbs[1] = phi[0]
         else:
             shift_pbs = np.roll(pbs, 1) * phi[i - 1]
             pbs = pbs * (1 - phi[i - 1]) + shift_pbs
 
-        exp_precis = np.sum(np.array([pbs[j] * j / i for j in range(i + 1)]))
-        if exp_precis >= max_exp:
-            k_star = i
-            max_exp = exp_precis
+        idx_s = ceil(i * pt)
+        precis_prob = np.sum(pbs[idx_s : i + 1])
 
-    if args.samples is None:
-        ans = topk[:k_star]
-    else:
-        pilots_false = args.samples[
-            np.where(oracle_dist[args.samples] > args.Dist_t)[0]
-        ]
-        ans = set_diff(array_union(topk[:k_star], args.samples), pilots_false)
+        if precis_prob >= Prob:
+            k_star = i
+
+    if k_star == 0:
+        return 1, 0, k_star, topk[:k_star], 0, 0
+
+    ans = topk[:k_star]
 
     # fixed sample's precision
-    fix_true_ans = args.fix_sample[
-        np.where(oracle_dist[args.fix_sample] <= args.Dist_t)[0]
-    ]
+    fix_true_ans = fix_sample[np.where(oracle_dist[fix_sample] <= Dist_t)[0]]
     fix_true_pos = len(np.intersect1d(ans, fix_true_ans))
-    if len(np.intersect1d(ans, args.fix_sample)) == 0:
+
+    if len(np.intersect1d(ans, fix_sample)) == 0:
         fix_precision = 0
     else:
-        fix_precision = fix_true_pos / len(np.intersect1d(ans, args.fix_sample))
+        fix_precision = fix_true_pos / len(np.intersect1d(ans, fix_sample))
     if len(fix_true_ans) == 0:
         fix_recall = 0
     else:
         fix_recall = fix_true_pos / len(fix_true_ans)
 
+    if pilots is None:
+        ans = topk[:k_star]
+    else:
+        pilots_false = pilots[np.where(oracle_dist[pilots] > Dist_t)[0]]
+        ans = set_diff(array_union(topk[:k_star], pilots), pilots_false)
+
     true_pos = len(np.intersect1d(ans, true_ans))
-    precision = true_pos / len(ans)
+    if len(ans) == 0:
+        precision = 0
+    else:
+        precision = true_pos / len(ans)
     recall = true_pos / len(true_ans)
 
     return precision, recall, k_star, ans, fix_precision, fix_recall
 
 
-def test_PQE_RT(args, oracle_dist, proxy_dist, rt):
-    topk, phi = preprocess_topk_phi(
-        proxy_dist, norm_scale=args.est_scale, t=args.Dist_t
-    )
+def test_SPRinT(args, oracle_dist, proxy_dist, pt, find_rt=True):
+    if find_rt:
+        args.samples = None
+    else:
+        args.samples = args.fix_sample
 
-    precision, recall, _, ans, fix_prec, fix_rec = test_PQA_RT(
-        args,
+    est_scale = (
+        np.std(oracle_dist[args.fix_sample] - proxy_dist[args.fix_sample]) + std_offset
+    )
+    topk, phi = preprocess_topk_phi(proxy_dist, norm_scale=est_scale, t=args.Dist_t)
+
+    precision, recall, _, ans, fix_prec, fix_rec = SPRinT(
+        args.Dist_t,
+        args.Prob,
+        args.fix_sample,
         oracle_dist,
         phi,
         topk,
-        rt=rt,
+        pt=pt,
+        pilots=args.samples,
     )
+
     verbose_print(
         args,
         f"true precision is {precision}, true recall is {recall}, and the precision for fixed sample is {fix_prec}, and recall for fixed sample is {fix_rec}",
@@ -127,12 +114,15 @@ def test_PQE_RT(args, oracle_dist, proxy_dist, rt):
     return precision, recall, _, ans, fix_prec, fix_rec
 
 
-def PQE_better(
+def run_experiment(
     args,
     Oracle_dist,
+    Proxy_dist,
     seed,
 ):
     acc_l = []
+    relativeError_l = []
+    absoluteError_l = []
     recall_l = []
     precision_l = []
     fix_prec_l = []
@@ -141,25 +131,32 @@ def PQE_better(
     agg_S_l = []
     NN_S_l = []
     NN_RT_l = []
+    time_l = []
     cannot_times_l = []
 
-    if args.hypothesis_type == "NNH":
+    if args.agg in ["avg", "var", "sum"]:
         CI_l = []
         f1_l = []
         fix_f1_l = []
 
     for i in range(args.num_sample):
+        start_sample = time.time()
         np.random.seed(seed * i)
 
-        indices = np.random.choice(Oracle_dist.shape[0], args.total_cost, replace=False)
+        # --- Sample a subset S from the full distributions ---
+        indices = np.random.choice(Oracle_dist.shape[0], args.s, replace=False)
         oracle_dist_S = Oracle_dist[indices]
         proxy_dist_S = Proxy_dist[indices]
         args.true_ans_S = np.where(oracle_dist_S <= args.Dist_t)[0]
         args.NN_S = len(args.true_ans_S)
-        verbose_print(args, f"Find NN in S is {args.NN_S}")
+        verbose_print(
+            args, f">>> algo {args.algo} | sample {i} | Find NN in S is {args.NN_S}"
+        )
 
-        if args.hypothesis_type == "P-NNH":
+        # --- Compute Aggregation Value in S ---
+        if args.agg == "pct":
             args.agg_S = len(args.true_ans_S) / oracle_dist_S.shape[0]
+            verbose_print(args, f"the prop in S is {args.agg_S}")
         else:
             args.S_attr = [args.D_attr[i] for i in indices]
             args.l_S, args.agg_S = agg_value(
@@ -170,65 +167,133 @@ def PQE_better(
             )
             verbose_print(
                 args,
-                f"The number of NN in S is {len(args.true_ans_S)} ({len(args.true_ans_S)/proxy_dist_S.shape[0]}%), the aggregation of true NN is {args.agg_S} and the aggregated value of all data in S is {args.agg_S_full}",
+                f"The number of NN in S is {len(args.true_ans_S)} ({(len(args.true_ans_S)/proxy_dist_S.shape[0])*100}%), the aggregation of true NN is {args.agg_S} and the aggregated value of all data in S is {args.agg_S_full}",
             )
 
-        # prepare pilot sample
+        # --- Choose pilot samples ---
         args.fix_sample = np.random.choice(
-            len(oracle_dist_S), size=int(args.initial_cost), replace=False
+            len(oracle_dist_S), size=int(args.s_p), replace=False
         )
-        available_indices = np.setdiff1d(np.arange(len(oracle_dist_S)), args.fix_sample)
-        args.available_oracle_dist_S = oracle_dist_S[available_indices]
-        args.available_proxy_dist_S = proxy_dist_S[available_indices]
+        args.oracle_dist_S_p = oracle_dist_S[args.fix_sample]
+        args.proxy_dist_S_p = proxy_dist_S[args.fix_sample]
+        pilot_nn = len(np.where(args.oracle_dist_S_p <= args.Dist_t)[0])
+        verbose_print(args, f"Number of NN in pilot sample: {pilot_nn}")
 
-        # no probe sample
-        args.est_scale = norm_scale
-        args.samples = None
+        start_query_sample = time.time()
 
-        # find optimal rt
-        args.rt, CANNOT = find_optimal_rt(args, oracle_dist_S, proxy_dist_S)
-        args.optimal_cost = args.initial_cost  # + args.probe_cost
+        # --- Run the selected algorithm ---
+        if args.algo == "SPRinT":
+            args.optimal_cost = args.s_p
+            before_rt = time.time()
+            verbose_print(
+                args,
+                f"Data preparation time: {round(time.time() - start_sample, 2)} sec",
+            )
+            args.rt, CANNOT = find_optimal_rt(args, oracle_dist_S, proxy_dist_S)
+            verbose_print(
+                args, f"Optimal rt search time: {round(time.time() - before_rt, 2)} sec"
+            )
+            before_algo = time.time()
+            prec, rec, _, ANS, fix_prec, fix_rec = test_SPRinT(
+                args, oracle_dist_S, proxy_dist_S, args.rt, find_rt=False
+            )
 
-        # find NN by SPRinT
-        RT_precision, RT_recall, _, RT_ans, fix_prec, fix_rec = test_PQE_RT(
-            args, oracle_dist_S, proxy_dist_S, args.rt
-        )
-        args.NN_RT = len(RT_ans)
+        elif args.algo in ["PQA-RT", "PQA-PT"]:
+            args.optimal_cost = args.s_p
+            before_algo = time.time()
+            args.target = (
+                args.recall_target if args.algo == "PQA-RT" else args.precision_target
+            )
+            prec, rec, _, ANS, _, _ = test_PQE(
+                args, oracle_dist_S, proxy_dist_S, args.algo[-2:], args.target
+            )
+            fix_prec, fix_rec, CANNOT = np.nan, np.nan, np.nan
+
+        elif args.algo in ["SUPG-RT", "SUPG-PT"]:
+            args.optimal_cost = args.s_p
+            before_algo = time.time()
+            args.target = (
+                args.recall_target if args.algo == "SUPG-RT" else args.precision_target
+            )
+            prec, rec, _, _, ANS = SUPG(
+                oracle_dist_S,
+                proxy_dist_S,
+                args.Dist_t,
+                args.target,
+                args.Prob,
+                cost=args.s_p,
+                query_type=args.algo[-2:],
+            )
+            fix_prec, fix_rec, CANNOT = np.nan, np.nan, np.nan
+
+        elif args.algo == "TopK":
+            before_algo = time.time()
+            prec, rec, args.optimal_cost, ANS = test_topk(
+                oracle_dist=oracle_dist_S,
+                proxy_dist=proxy_dist_S,
+                scale=norm_scale,
+                t=args.Dist_t,
+                prob=args.Prob,
+            )
+            fix_prec, fix_rec, CANNOT = np.nan, np.nan, np.nan
+        else:
+            raise ValueError("Unknown algorithm specified in args.algo")
+
+        args.NN = len(ANS)
         verbose_print(
             args,
-            f"recall: {RT_recall}, prcision: {RT_precision} at cost {args.optimal_cost}, fix prec: {fix_prec}, fix recall: {fix_rec}",
+            f"{args.algo} results | Recall: {rec}, Precision: {prec}, "
+            f"Fix Prec: {fix_prec}, Fix Rec: {fix_rec} (Cost: {args.s_p})",
+        )
+        verbose_print(
+            args, f"{args.algo} search time: {round(time.time() - before_algo, 2)} sec"
         )
 
-        recall_l.append(RT_recall)
-        precision_l.append(RT_precision)
+        recall_l.append(rec)
+        precision_l.append(prec)
         fix_prec_l.append(fix_prec)
         fix_rec_l.append(fix_rec)
 
-        if args.hypothesis_type == "P-NNH":
-            approx_agg_S = round(len(RT_ans) / proxy_dist_S.shape[0], 4)
-            verbose_print(args, f"the prop is {approx_agg_S}")
-        elif args.hypothesis_type == "NNH":
-            approx_l_S, approx_agg_S = agg_value(
-                args.S_attr, RT_ans, args.attr_id, args.agg
-            )
+        # --- Compute the approximated aggregation over found NN ---
+        if args.agg == "pct":
+            approx_agg_S = round(args.NN / proxy_dist_S.shape[0], 4)
+            verbose_print(args, f"the approx prop is {approx_agg_S}")
+        else:
+            L_S, approx_agg_S = agg_value(args.S_attr, ANS, args.attr_id, args.agg)
+
             verbose_print(
                 args,
-                f"The number of NN by SPRinT is {len(RT_ans)} ({len(RT_ans)/proxy_dist_S.shape[0]}%), the approximated aggregated value is {approx_agg_S}",
+                f"The number of NN by {args.algo} is {args.NN} ({(args.NN/proxy_dist_S.shape[0])*100}%), the approximated aggregated value is {approx_agg_S}",
             )
-            if (RT_precision + RT_recall) == 0:
-                approx_f1 = 0
-            else:
-                approx_f1 = 2 * RT_recall * RT_precision / (RT_precision + RT_recall)
-            if (fix_prec + fix_rec) == 0:
-                approx_fix_f1 = 0
-            else:
-                approx_fix_f1 = 2 * fix_prec * fix_rec / (fix_prec + fix_rec)
 
+            if (prec + rec) == 0:
+                f1 = 0
+            else:
+                f1 = compute_f1_score(args, prec, rec)
+            if np.isnan(fix_prec):
+                fix_f1 = np.nan
+            elif (fix_prec + fix_rec) == 0:
+                fix_f1 = 0
+            else:
+                fix_f1 = compute_f1_score(args, fix_prec, fix_rec)
+
+            f1_l.append(f1)
+            fix_f1_l.append(fix_f1)
+
+        time_l.append(round(time.time() - start_query_sample, 2))
+
+        # --- Hypothesis Testing ---
+        before_HT = time.time()
         for fac in args.fac_list:
+            if not (
+                (args.hypothesis_type == "P-NNH" and args.agg == "pct")
+                or (args.hypothesis_type == "NNH" and args.agg == "avg")
+            ):
+                print(f"no HT application for {args.hypothesis_type} and {args.agg}")
+                break
             for H1_op in ["greater", "less"]:
-                if args.hypothesis_type == "P-NNH":
+                if args.hypothesis_type == "P-NNH" and args.agg == "pct":
                     c_time_GT = (len(args.true_ans_D) / Oracle_dist.shape[0]) * fac
-                    verbose_print(args, f">>> c is {c_time_GT}")
 
                     _, _, GT = one_proportion_z_test(
                         len(args.true_ans_D),
@@ -237,88 +302,97 @@ def PQE_better(
                         0.05,
                         H1_op,
                     )
-                    verbose_print(
-                        args, f"the ground truth to reject H0 result is : {GT}"
-                    )
 
                     rt_align, _ = HT_acc_z_test(
                         args,
                         "PQE-RT",
-                        RT_ans,
+                        ANS,
                         oracle_dist_S.shape[0],
                         GT,
                         c_time_GT,
                         H1_op,
                     )
+
                     acc_l.append(rt_align)
 
-                elif args.hypothesis_type == "NNH":
+                elif args.hypothesis_type == "NNH" and args.agg == "avg":
                     c_time_GT = args.agg_D * fac
-                    verbose_print(args, f">>> c is {c_time_GT}")
 
                     _, GT, _, _ = HT_acc_t_test(
                         args, args.l_D, c_time_GT, H1_op, is_D=True
                     )
-                    verbose_print(
-                        args, f"the ground truth to reject H0 result is : {GT}"
-                    )
-
                     rt_align, _, rt_CI_l, rt_CI_h = HT_acc_t_test(
-                        args, approx_l_S, c_time_GT, H1_op, GT=GT, is_D=False
+                        args, L_S, c_time_GT, H1_op, GT=GT, is_D=False
                     )
 
                     acc_l.append(rt_align)
                     CI_l.append(rt_CI_h - rt_CI_l)
-                    f1_l.append(approx_f1)
-                    fix_f1_l.append(approx_fix_f1)
+                    f1_l.append(f1)
+                    fix_f1_l.append(fix_f1)
+
+        verbose_print(
+            args, f"time of hypothesis testing {round(time.time() - before_HT,2)}"
+        )
+
+        # --- Error Calculation ---
+        if args.agg == "sum":
+            approx_agg_S = approx_agg_S * (Oracle_dist.shape[0] / args.s)
+
+        relativeError = abs(approx_agg_S - args.agg_D) / args.agg_D * 100
+        relativeError_l.append(relativeError)
+        absoluteError = abs(approx_agg_S - args.agg_D)
+        absoluteError_l.append(absoluteError)
 
         agg_l.append(approx_agg_S)
-        agg_S_l.append(args.agg_S)
+        agg_S_l.append(args.agg_D)
         NN_S_l.append(args.NN_S)
-        NN_RT_l.append(args.NN_RT)
+        NN_RT_l.append(args.NN)
         cannot_times_l.append(CANNOT)
 
+    # --- Compute Overall Statistics ---
     avg_acc = np.nanmean(acc_l)
-    avg_recall = np.nanmean(recall_l)
-    avg_precision = np.nanmean(precision_l)
+    avg_absError = np.nanmean(absoluteError_l)
+    avg_error = np.nanmean(relativeError_l)
+    avg_rec = np.nanmean(recall_l)
+    avg_prec = np.nanmean(precision_l)
     avg_fix_rec = np.nanmean(fix_rec_l)
     avg_fix_prec = np.nanmean(fix_prec_l)
     avg_NN_S = np.nanmean(NN_S_l)
     avg_NN_RT = np.nanmean(NN_RT_l)
     cannot_times = np.nanmean(cannot_times_l)
+    avg_execution_time = np.nanmean(time_l[1:])
+
     verbose_print(
-        args,
-        f"the average accuracy over {args.num_sample} runs and {args.fac_list} is {avg_acc}",
-    )
-    verbose_print(args, f"the average recall over {args.num_sample} is {avg_recall}")
-    verbose_print(
-        args, f"the average precision over {args.num_sample} is {avg_precision}"
+        args, f"Average relative error over {args.num_sample} runs: {avg_error}"
     )
     verbose_print(
-        args, f"the average fix recall over {args.num_sample} is {avg_fix_rec}"
+        args, f"Average absolute error over {args.num_sample} runs: {avg_absError}"
     )
-    verbose_print(
-        args, f"the average fix precision over {args.num_sample} is {avg_fix_prec}"
-    )
-    verbose_print(args, f"the average NN in S over {args.num_sample} is {avg_NN_S}")
-    verbose_print(
-        args, f"the average NN by SPRinT in S over {args.num_sample} is {avg_NN_RT}"
-    )
+    verbose_print(args, f"Average HT accuracy over {args.num_sample} runs: {avg_acc}")
+    verbose_print(args, f"Average recall: {avg_rec}")
+    verbose_print(args, f"Average precision: {avg_prec}")
+    verbose_print(args, f"Average fixed recall: {avg_fix_rec}")
+    verbose_print(args, f"Average fixed precision: {avg_fix_prec}")
+    verbose_print(args, f"Average NN in S: {avg_NN_S}")
+    verbose_print(args, f"Average NN by {args.algo} in S: {avg_NN_RT}")
+    verbose_print(args, f"Average execution time: {avg_execution_time}")
 
     avg_agg = np.nanmean(agg_l)
     var_agg = np.nanvar(agg_l)
     avg_agg_S = np.nanmean(agg_S_l)
-    var_agg_S = np.nanvar(agg_S_l)
+    std_deviation = np.nanstd(relativeError_l, ddof=1)
+    standard_error = std_deviation / np.sqrt(np.sum(~np.isnan(relativeError_l)))
 
-    if args.hypothesis_type == "P-NNH":
-        verbose_print(
-            args,
-            f"the average prop_S over {args.num_sample} is {avg_agg} with variance {round(var_agg,4)}",
-        )
+    # --- Return Results Based on Aggregation Type ---
+    if args.agg == "pct":
+        verbose_print(args, f"Avg prop_S: {avg_agg} with variance {round(var_agg,4)}")
         return (
+            avg_execution_time,
+            avg_error,
+            avg_absError,
             avg_acc,
-            avg_recall,
-            avg_precision,
+            avg_rec,
+            avg_prec,
             avg_fix_rec,
             avg_fix_prec,
             avg_NN_RT,
@@ -326,33 +400,30 @@ def PQE_better(
             var_agg,
             avg_NN_S,
             avg_agg_S,
-            var_agg_S,
+            standard_error,
             None,
             None,
             None,
             cannot_times,
         )
-    elif args.hypothesis_type == "NNH":
+    else:
         avg_CI = np.mean(CI_l)
         avg_f1 = np.mean(f1_l)
         avg_fix_f1 = np.mean(fix_f1_l)
         verbose_print(
-            args,
-            f"the average aggregate value over {args.num_sample} is {avg_agg} with variance {round(var_agg,4)}",
+            args, f"Avg aggregate value: {avg_agg} with variance {round(var_agg,4)}"
         )
-        verbose_print(
-            args,
-            f"the average aggregate value in S over {args.num_sample} is {avg_agg_S} with variance {round(var_agg_S,4)}",
-        )
-        verbose_print(args, f"the average CI over {args.num_sample} is {avg_CI}")
-        verbose_print(args, f"the average f1 score over {args.num_sample} is {avg_f1}")
-        verbose_print(
-            args, f"the average fix f1 score over {args.num_sample} is {avg_fix_f1}"
-        )
+        verbose_print(args, f"Avg aggregate in S: {avg_agg_S}")
+        verbose_print(args, f"Avg CI: {avg_CI}")
+        verbose_print(args, f"Avg F1 score: {avg_f1}")
+        verbose_print(args, f"Avg fixed F1 score: {avg_fix_f1}")
         return (
+            avg_execution_time,
+            avg_error,
+            avg_absError,
             avg_acc,
-            avg_recall,
-            avg_precision,
+            avg_rec,
+            avg_prec,
             avg_fix_rec,
             avg_fix_prec,
             avg_NN_RT,
@@ -360,7 +431,7 @@ def PQE_better(
             var_agg,
             avg_NN_S,
             avg_agg_S,
-            var_agg_S,
+            standard_error,
             avg_CI,
             avg_f1,
             avg_fix_f1,
@@ -368,116 +439,88 @@ def PQE_better(
         )
 
 
-def process_results_NNH(
-    args,
-    seed,
-    avg_NN_RT,
-    avg_agg,
-    var_agg,
-    avg_NN_S,
-    avg_agg_S,
-    var_agg_S,
-    avg_CI,
-    avg_f1,
-    avg_fix_f1,
-    avg_acc,
-    avg_recall,
-    avg_precision,
-    avg_fix_rec,
-    avg_fix_prec,
-    cannot_times,
-):
-    # Saving result
-    file_name = f"results/SPRinT_{args.PQA}/{args.hypothesis_type}_{args.Fname}_{args.version}.txt"
-    with open(file_name, "a") as file:
-        # Write the header (if it's not already present in the file)
-        if seed == 1:
-            file.write(
-                "seed\toptimal cost\tno optimal rt counts\tavg acc\tavg recall\tavg precision\tavg f1\tavg fix recall\tavg fix precision\tavg fix f1\tagg ours\tvar ours\tNN ours\tagg_S\tvar agg_S\tNN S\tavg CI\n"
-            )
-
-        # Write the data for the current seed
-        if avg_CI is None:  # P-NNH
-            file.write(
-                f"{seed:.4f}\t{args.optimal_cost:.4f}\t{cannot_times:.4f}\t{avg_acc:.4f}\t{avg_recall:.4f}\t{avg_precision:.4f}\t{avg_f1}\t{avg_fix_rec:.4f}\t{avg_fix_prec:.4f}\t{avg_fix_f1}\t{avg_agg:.4f}\t{var_agg:.4f}\t{avg_NN_RT:.4f}\t{avg_agg_S}\t{var_agg_S}\t{avg_NN_S:.4f}\t{None}\n"
-            )
-        else:
-            file.write(
-                f"{seed:.4f}\t{args.optimal_cost:.4f}\t{None}\t{avg_acc:.4f}\t{avg_recall:.4f}\t{avg_precision:.4f}\t{avg_f1:.4f}\t{avg_fix_rec:.4f}\t{avg_fix_prec:.4f}\t{avg_fix_f1:.4f}\t{avg_agg:.4f}\t{var_agg:.4f}\t{avg_NN_RT:.4f}\t{avg_agg_S:.4f}\t{var_agg_S:.4f}\t{avg_NN_S:.4f}\t{avg_CI:.4f}\n"
-            )
-    verbose_print(
-        args,
-        f"At recall target={args.recall_target} and precision target={args.precision_target}; we find optimal cost={args.optimal_cost} and optimal rt={args.rt}",
-    )
-    verbose_print(
-        args,
-        f"avg acc: {avg_acc}, avg recall: {avg_recall}, avg precision: {avg_precision}, avg fix recall: {avg_fix_rec}, avg precision: {avg_fix_prec}",
-    )
-    verbose_print(args, "execution time is %.2fs" % (time.time() - args.start_time))
+def f1_score(args, t, oracle_dist_S, proxy_dist_S):
+    _, fix_prec, fix_rec = test_SPRinT(args, oracle_dist_S, proxy_dist_S, t)
+    if fix_prec + fix_rec == 0:
+        return 0
+    else:
+        return compute_f1_score(args, fix_prec, fix_rec)
 
 
-def find_optimal_rt(args, oracle_dist_S, proxy_dist_S, rt=0.1):
+def find_optimal_rt(args, oracle_dist_S, proxy_dist_S, rt=0.0001):
     CANNOT = 0
-    if args.hypothesis_type == "P-NNH":
+    if args.agg == "pct":
         max_t = 1
         min_t = rt
-        RT_fix_rec = 1
-        RT_fix_prec = 0
-        while abs(RT_fix_rec - RT_fix_prec) > 0.01:
+        fix_rec = 1
+        fix_prec = 0
+        while abs(fix_rec - fix_prec) > 0.0001:
             rt = (max_t + min_t) / 2
             verbose_print(args, f"---------- finding rt: {rt} ----------")
-            (
-                RT_precision,
-                RT_recall,
-                _,
-                RT_ans,
-                RT_fix_prec,
-                RT_fix_rec,
-            ) = test_PQE_RT(args, oracle_dist_S, proxy_dist_S, rt)
-            if RT_fix_rec < RT_fix_prec:
+
+            ans, fix_prec, fix_rec = test_SPRinT(args, oracle_dist_S, proxy_dist_S, rt)
+
+            if fix_prec < fix_rec:
                 min_t = rt
             else:
                 max_t = rt
 
-            if abs(min_t - max_t) < 0.001:
+            if abs(min_t - max_t) < 0.0001:
                 verbose_print(args, "CANNOT find optimal rt!!")
                 CANNOT = 1
                 break
             verbose_print(
                 args,
-                f"rt = {rt}: Found NN: {len(RT_ans)}, Precision {RT_precision}, Recall {RT_recall}, Pilot Precision {RT_fix_prec}, Pilot Recall {RT_fix_rec}",
+                f"rt = {rt}: Found NN: {len(ans)}, Pilot Precision {fix_prec}, Pilot Recall {fix_rec}",
             )
 
         optimal_t = rt
+        verbose_print(
+            args,
+            f"Found optimal recall target={optimal_t} with fix prec {fix_prec} and fix rec {fix_rec}",
+        )
 
     # F1 score
-    elif args.hypothesis_type == "NNH":
-        max_f1 = 0
-        while rt <= 1:
-            verbose_print(args, f"---------- finding rt: {rt} ----------")
-            (
-                RT_precision,
-                RT_recall,
-                _,
-                RT_ans,
-                RT_fix_prec,
-                RT_fix_rec,
-            ) = test_PQE_RT(args, oracle_dist_S, proxy_dist_S, rt)
-            if (RT_fix_prec + RT_fix_rec) == 0:
-                RT_F1 = 0
+    else:
+        left = 0
+        right = 1
+        tolerance = 0.01
+        while right - left > tolerance:
+            m1 = left + (right - left) / 3
+            m2 = right - (right - left) / 3
+            verbose_print(args, f"---------- finding rt between {m1, m2} ----------")
+            f1_m1 = f1_score(args, m1, oracle_dist_S, proxy_dist_S)
+            f1_m2 = f1_score(args, m2, oracle_dist_S, proxy_dist_S)
+
+            if f1_m1 <= f1_m2:
+                left = m1
             else:
-                RT_F1 = RT_fix_prec * RT_fix_rec * 2 / (RT_fix_prec + RT_fix_rec)
-            verbose_print(args, f"Found NN: {len(RT_ans)}, with F1 score: {RT_F1}")
+                right = m2
+        optimal_t = (left + right) / 2
+        max_f1 = f1_score(args, optimal_t, oracle_dist_S, proxy_dist_S)
 
-            if RT_F1 >= max_f1:
-                max_f1 = RT_F1
-                optimal_t = rt
-            rt += 0.01
-
-    verbose_print(
-        args,
-        f"Found optimal recall target={optimal_t}, we achieve recall {RT_recall} and precision: {RT_precision}, fix precision: {RT_fix_prec} and fix recall: {RT_fix_rec}",
-    )
+        # # naive brute force method
+        # max_f1 = 0
+        # f1_list = []
+        # f_p=[]
+        # f_r=[]
+        # while rt <= 1:
+        #     verbose_print(args, f"---------- finding rt: {rt} ----------")
+        #     f1 = f1_score(args, rt, oracle_dist_S, proxy_dist_S)
+        #     verbose_print(args, f"fix sample F1 score: {f1}")
+        #     f1_list.append(f1)
+        #
+        #     if f1 > max_f1 - 0.01:
+        #         max_f1 = f1
+        #         optimal_t = rt
+        #     rt += 0.01
+        #
+        # df = pd.DataFrame(f1_list, columns=["F1 score"])
+        # df.to_csv(f"{args.agg}_{args.Fname}_{args.file_suffix}.csv", index=False)
+        verbose_print(
+            args,
+            f"Found optimal recall target={optimal_t} with fix f1 {max_f1}",
+        )
     return optimal_t, CANNOT
 
 
@@ -488,96 +531,175 @@ if __name__ == "__main__":
 
     # Load data
     Proxy_emb, Oracle_emb = load_data(args)
+
     args.fac_list = np.arange(
         float(args.fac_list.split(",")[0]),
         float(args.fac_list.split(",")[1]),
         float(args.fac_list.split(",")[2]),
     )
 
-    verbose_print(args, f"Prob: {args.Prob}; r: {args.Dist_t}")
+    verbose_print(args, f"Prob: {args.Prob}; r: {args.Dist_t}; beta: {args.beta}")
     verbose_print(
         args,
-        f"Dataset: {args.Fname}, method: {args.hypothesis_type}, assumption: {args.PQA}, version: {args.version}, cost: {args.total_cost}",
+        f"Dataset: {args.Fname}, size: {Proxy_emb.shape} , aggregation function: {args.agg}, filename: {args.file_suffix}, s: {args.s}, s_p: {args.s_p}",
     )
 
     # Handle hypothesis-specific setup
-    if args.hypothesis_type == "NNH":
-        args.D_attr = get_data(
-            filename=f"data/medical/{args.Fname}/{args.Fname}.testfull"
-        )
-        args.agg = "mean"
-        verbose_print(args, f"H1: {args.agg} {args.attr} of NNs of q is tested.")
-    elif args.hypothesis_type == "P-NNH":
+    if args.agg == "pct":
         args.attr = "proportion"
+    else:
+        if args.Fname in ["eICU", "MIMIC-III"]:
+            attr_filename = f"data/Medical/{args.Fname}/{args.Fname}.testfull"
+            args.ori_D_attr = get_data(filename=attr_filename)
+        elif args.Fname in ["Amazon-HH", "Amazon-E"]:
+            attr_filename = f"data/Amazon/{args.Fname}/{args.Fname}.testfull"
+            args.ori_D_attr = get_data(filename=attr_filename)
+
+        elif args.Fname in ["Jackson"]:
+            attr_filename = f"data/Video/jackson10000_attribute.csv"
+            df = pd.read_csv(attr_filename)
+            args.ori_D_attr = np.vstack(np.array(df["attribute_list"])).tolist()
+            args.ori_D_attr = [["", "", speed] for speed in args.ori_D_attr]
+
+        verbose_print(
+            args,
+            f"H1: {args.agg} {args.attr} (ind = {args.attr_id}) of NNs of q is tested.",
+        )
 
     # Prepare output path
-    Path(f"./results/SPRinT_{args.PQA}/").mkdir(parents=True, exist_ok=True)
+    Path(f"./results/{args.algo}/").mkdir(parents=True, exist_ok=True)
 
-    for seed in range(1, 2):
+    for seed in range(1, 11):
         args.optimal_cost = None
         np.random.seed(seed)
 
         verbose_print(
             args, f"*********************** start seed {seed} ***********************"
         )
+
         # get oracle ground truth NN and agg
         query_indices = np.random.choice(
             range(len(Oracle_emb)), size=args.num_query, replace=False
         )
+        query_emb = Oracle_emb[query_indices]
         Oracle_dist, Proxy_dist = prepare_distances(
-            args, Oracle_emb, Proxy_emb, query_indices
+            args, Oracle_emb, Proxy_emb, query_emb
         )
 
         args.true_ans_D = np.where(Oracle_dist <= args.Dist_t)[0]
-        if args.hypothesis_type == "NNH":
+        if args.agg == "pct":
+            args.agg_D = len(args.true_ans_D) / Oracle_dist.shape[0]
+            verbose_print(
+                args,
+                f"Ground Truth NN is {len(args.true_ans_D)}, proportion is {args.agg_D}",
+            )
+        else:
+            args.l_D, args.agg_D = agg_value(
+                args.ori_D_attr, args.true_ans_D, args.attr_id, "avg"
+            )
+
+            l_D_full, agg_D_full = agg_value(
+                args.ori_D_attr, range(len(args.ori_D_attr)), args.attr_id, "avg"
+            )
+
+            half_size = len(args.true_ans_D) // 2
+            std_dev = np.sqrt(np.var(args.l_D))
+            bootstrapped_samples_1 = np.random.choice(args.l_D, half_size, replace=True)
+            bootstrapped_samples_2 = np.random.choice(
+                l_D_full, len(args.true_ans_D) - half_size, replace=True
+            )
+
+            noise_1 = np.random.uniform(-0.5 * std_dev, 0.5 * std_dev, size=half_size)
+            noise_2 = np.random.uniform(
+                -1.5 * std_dev, 1.5 * std_dev, size=len(args.true_ans_D) - half_size
+            )
+
+            # Apply noise to boost variance
+            modified_distribution_1 = bootstrapped_samples_1 / 2 + noise_1
+            modified_distribution_2 = bootstrapped_samples_2 + noise_2
+
+            distribution = np.concatenate(
+                [modified_distribution_1, modified_distribution_2]
+            )
+
+            if args.Fname in ["eICU"]:
+                distribution = np.clip(distribution, 0, 100)
+
+            elif args.Fname in ["MIMIC-III"]:
+                distribution = np.clip(distribution, 30, 180)
+
+            elif args.Fname in ["Amazon-HH", "Amazon-E"]:
+                distribution = np.clip(distribution, 0, 5)
+
+            elif args.Fname in ["Jackson"]:
+                distribution = np.clip(distribution, 20, 100)
+
+            np.random.shuffle(distribution)  # Shuffle to avoid order bias
+
+            args.D_attr = copy.deepcopy(args.ori_D_attr)
+
+            count = 0
+            for idx in args.true_ans_D:
+                args.D_attr[idx][2][args.attr_id] = distribution[count]
+                count += 1
+
             args.l_D, args.agg_D = agg_value(
                 args.D_attr, args.true_ans_D, args.attr_id, args.agg
             )
-            verbose_print(args, f"Ground Truth Aggregation: {args.agg_D}")
-        elif args.hypothesis_type == "P-NNH":
-            args.prop_D = len(args.true_ans_D) / Oracle_dist.shape[0]
-            verbose_print(args, f"Ground Truth Proportion: {args.prop_D}")
+            print(args.agg_D)
 
-        # rerun algo for 30 times for average results
+            verbose_print(
+                args,
+                f"Ground Truth NN is {len(args.true_ans_D)} ({round(len(args.true_ans_D)/len(Oracle_emb),4)*100}%), aggregation is {args.agg_D}",
+            )
+
+        # rerun algo for num_sample times for average results
         (
+            avg_execution_time,
+            avg_error,
+            avg_absError,
             avg_acc,
-            avg_recall,
-            avg_precision,
-            avg_fix_recall,
-            avg_fix_precision,
+            avg_rec,
+            avg_prec,
+            avg_fix_rec,
+            avg_fix_prec,
             avg_NN_RT,
             avg_agg,
             var_agg,
             avg_NN_S,
             avg_agg_S,
-            var_agg_S,
+            standard_error,
             avg_CI,
             avg_f1,
             avg_fix_f1,
             cannot_times,
-        ) = PQE_better(
+        ) = run_experiment(
             args,
             Oracle_dist,
+            Proxy_dist,
             seed,
         )
 
         # output results
-        process_results_NNH(
+        output_results(
             args,
             seed,
+            avg_execution_time,
+            avg_error,
+            avg_absError,
             avg_NN_RT,
             avg_agg,
             var_agg,
             avg_NN_S,
             avg_agg_S,
-            var_agg_S,
+            standard_error,
             avg_CI,
             avg_f1,
             avg_fix_f1,
             avg_acc,
-            avg_recall,
-            avg_precision,
-            avg_fix_recall,
-            avg_fix_precision,
+            avg_rec,
+            avg_prec,
+            avg_fix_rec,
+            avg_fix_prec,
             cannot_times,
         )
