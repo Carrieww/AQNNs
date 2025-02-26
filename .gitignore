@@ -13,6 +13,7 @@
 /data/README.md
 /supg/data/
 figures*
+myscript_*
 
 /results
 /venv

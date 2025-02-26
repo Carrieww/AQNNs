@@ -75,9 +75,3 @@ if __name__ == '__main__':
         Index = np.random.choice(range(len(Oracle)), size=num_query, replace=False)
 
         plot_proxy_quality(oracle=Oracle, proxy=Proxy, index=Index)
-
-
-
-
-
-
