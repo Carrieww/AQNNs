@@ -115,7 +115,7 @@ def run_experiment(cur_experiment, df):
             cur_experiment["selector"], query, sampler, source)
 
     trial_runner = TrialRunner()
-    results_df = trial_runner.run_trials(
+    results_df, all_neighbors = trial_runner.run_trials(
         selector=selector,
         query=query,
         sampler=sampler,
@@ -133,7 +133,10 @@ def run_experiment(cur_experiment, df):
         # 'nb_true': ['mean', 'sem'],
         # 'nb_sampled': ['mean', 'sem']
     })
-    return list(agg_results.loc['mean'])
+    # print(agg_results)
+    # print(len(all_neighbors))
+    # ANS = df.loc[all_neighbors,'id'].tolist()
+    return list(agg_results.loc['mean']), all_neighbors
     # print(agg_results)
 
 

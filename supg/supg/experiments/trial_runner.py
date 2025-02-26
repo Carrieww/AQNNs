@@ -24,6 +24,7 @@ class TrialRunner:
             verbose: bool = False,
     ):
         results = []
+        all_neighbors = []
         ordered_ids = source.get_ordered_idxs()
         true_labels = source.lookup(ordered_ids)
         nb_true = np.sum(true_labels)
@@ -50,7 +51,9 @@ class TrialRunner:
                 'nb_sampled': nb_sampled,
                 "trial_idx": i,
                 "na_tau": na_tau,
+                # "selected_ids": inds
             })
+            all_neighbors.extend(inds)
             sampler.reset()
 
         results_df = pd.DataFrame(results)
@@ -67,4 +70,4 @@ class TrialRunner:
             results_df["covered"] = False
         # print("Frac Correct: {}".format(np.mean(results_df["covered"])))
         # print("Avg Recall: {}".format(np.mean(results_df["recall"])))
-        return results_df
+        return results_df, all_neighbors

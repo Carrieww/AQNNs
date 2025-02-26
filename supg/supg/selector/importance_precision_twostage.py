@@ -60,11 +60,23 @@ class ImportancePrecisionTwoStageSelector(BaseSelector):
 
         samp2_ranks = np.sort(self.sampler.sample(max_idx=cutoff_ub, s=n_sample_2))
         x_weights = self.sampler.weights
-        samp2_basep = x_basep[samp2_ranks]
-        samp2_weights = x_weights[samp2_ranks]
-        samp2_ids = data_idxs[samp2_ranks]
-        samp2_labels = self.data.lookup(samp2_ids)
-        samp2_masses = samp2_basep / samp2_weights
+        if len(samp2_ranks) > 0:
+            samp2_basep = x_basep[samp2_ranks]
+            samp2_weights = x_weights[samp2_ranks]
+            samp2_ids = data_idxs[samp2_ranks]
+            samp2_labels = self.data.lookup(samp2_ids)
+            samp2_masses = samp2_basep / samp2_weights
+        else:
+            samp2_basep = np.array([])
+            samp2_weights = np.array([])
+            samp2_ids = np.array([])
+            samp2_labels = np.array([])
+            samp2_masses = np.array([])
+        # samp2_basep = x_basep[samp2_ranks]
+        # samp2_weights = x_weights[samp2_ranks]
+        # samp2_ids = data_idxs[samp2_ranks]
+        # samp2_labels = self.data.lookup(samp2_ids)
+        # samp2_masses = samp2_basep / samp2_weights
         # print("ns2: {}, len(samp2): {}".format(n_sample_2, len(samp2_ids)))
 
         allowed = [0]

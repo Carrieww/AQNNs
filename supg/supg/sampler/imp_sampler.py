@@ -26,8 +26,8 @@ class ImportanceSampler(Sampler):
         self.raw_weights = weights
 
         scaled_probs = weights / np.sum(weights)
-        uniform_prob = 1/len(weights)
-        mixed_probs = scaled_probs * (1-self.mixing_eps) + uniform_prob * self.mixing_eps
+        uniform_prob = 1 / len(weights)
+        mixed_probs = scaled_probs * (1 - self.mixing_eps) + uniform_prob * self.mixing_eps
         self.weights = mixed_probs
 
     def sample(self, max_idx: int, s: int):
@@ -39,11 +39,18 @@ class ImportanceSampler(Sampler):
         """
         if s > max_idx:
             s = max_idx
+
+        if s == 0:
+            self.sampled_idxs = np.array([])
+            self.sampled_weights = np.array([])
+            return self.sampled_idxs
+
         if max_idx != len(self.weights):
             weights = self.weights[:max_idx]
             weights /= weights.sum()
         else:
             weights = self.weights
+
         self.sampled_idxs = self.random.choice(max_idx, size=s, replace=True, p=weights)
         self.sampled_weights = self.weights[self.sampled_idxs]
         return self.sampled_idxs
@@ -72,8 +79,7 @@ class ImportanceReuseSampler(ImportanceSampler):
         else:
             weights = self.weights
 
-
-        rand_idxs = self.random.choice(max_idx, size=s*10, replace=True, p=weights)
+        rand_idxs = self.random.choice(max_idx, size=s * 10, replace=True, p=weights)
         taken = 0
         self.sampled_idxs = []
         for rand_idx in rand_idxs:
