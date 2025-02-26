@@ -1,6 +1,6 @@
 # On Aggregation Queries over Predicted Nearest Neighbors
 
-This repository contains code and data for the paper **On Aggregation Queries over Predicted Nearest Neighbors** by Carrie Wang, Sihem Amer-Yahia, Reynold Cheng, and Laks V. S. Lakshmanan
+This repository contains code and data for the paper **On Aggregation Queries over Predicted Nearest Neighbors** by Carrie Wang, Sihem Amer-Yahia, Laks V. S. Lakshmanan, and Reynold Cheng
 
 ## Table of Contents
 
@@ -37,4 +37,4 @@ Run all algorithms to answer AQNNs with four aggregation functions, using:
 
 ## License
 
-This project is licensed under the MIT License. See the `LICENSE` file for more details.
+This project is licensed under the MIT License.

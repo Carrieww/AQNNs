@@ -33,6 +33,44 @@ def get_data(filename=None, is_text=False):
 
     return instance_list
 
+def create_semi_synthetic_data(original_oracle, original_proxy,original_attr, factor=10, noise_level=0.01):
+    if factor == 0:
+        return original_proxy, original_oracle,original_attr
+
+    # Assume original_data is a numpy array
+    synthetic_o = []
+    synthetic_p = []
+    synthetic_attr = []
+    for _ in range(factor):
+        # Bootstrap sample with replacement
+        sample_ind = np.random.choice(range(len(original_oracle)), size=len(original_oracle), replace=True)
+        sample_oracle = original_oracle[sample_ind]
+        sample_proxy = original_proxy[sample_ind]
+        if len(original_attr) == 0:
+            pass
+        else:
+            sample_attr = [original_attr[i] for i in sample_ind]
+
+        # Add random noise
+        noisy_sample_o = sample_oracle + np.random.normal(0, noise_level, size=sample_oracle.shape)
+        noisy_sample_p = sample_proxy + np.random.normal(0, noise_level, size=sample_proxy.shape)
+
+        synthetic_o.append(noisy_sample_o)
+        synthetic_p.append(noisy_sample_p)
+        if len(original_attr) == 0:
+            pass
+        else:
+            synthetic_attr = synthetic_attr + sample_attr
+    # Concatenate to form a larger dataset
+    combined_oracle = np.concatenate((original_oracle, np.concatenate(synthetic_o, axis=0)), axis=0)
+    combined_proxy = np.concatenate((original_proxy, np.concatenate(synthetic_p, axis=0)), axis=0)
+    if len(original_attr) == 0:
+        combined_attr=[]
+    else:
+        combined_attr = original_attr+synthetic_attr
+
+    return combined_proxy, combined_oracle,combined_attr
+
 
 def load_data(args):
     name = args.Fname
@@ -54,12 +92,20 @@ def load_data(args):
         oracle_pred = [item[1] for item in oracle_pred_data]
         oracle_pred = np.array(oracle_pred)
         return proxy_pred, oracle_pred
-    else:
-        filename = f"data/{name}/jackson10000_attribute.csv"
+    elif name == "Jigsaw":
+        filename_pred = f"data/{name}/" + name + ".pred"
+        filename_truth = f"data/{name}/" + name + ".truth"
 
+        proxy_pred = np.array(get_data(filename=filename_pred))
+        oracle_pred = np.array(get_data(filename=filename_truth))
+
+        return proxy_pred, oracle_pred
+    elif name == "Jackson":
+        filename = f"data/Video/jackson10000_attribute.csv"
         df = pd.read_csv(filename)
-
         return np.vstack(np.array(df["proxy_score"])), np.vstack(np.array(df["label"]))
+    else:
+        raise Exception("The dataset is not implemented yet")
 
 
 def preprocess_dist(oracle, proxy, query):
@@ -70,20 +116,11 @@ def preprocess_dist(oracle, proxy, query):
     else:
         oracle_dist = cdist(query, oracle, metric="cosine")[0]
         proxy_dist = cdist(query, proxy, metric="cosine")[0]
+
     nan2mean(proxy_dist)
     nan2mean(oracle_dist)
 
     return proxy_dist, oracle_dist
-
-
-#
-# @njit
-# def preprocess_ranks(proxy_dist):
-#     rank2pd = sorted(enumerate(proxy_dist), key=lambda x: x[1])
-#     ranks = np.array([i[0] for i in rank2pd])
-#
-#     return ranks
-
 
 def preprocess_topk_phi(proxy_dist, norm_scale, t):
     # This code finds the percentile rank of value t in a normal distribution with mean proxy_dist and standard deviation norm_scale.
@@ -93,7 +130,6 @@ def preprocess_topk_phi(proxy_dist, norm_scale, t):
     phi = np.array([i[1] for i in topk2phi])
 
     return topk, phi
-
 
 def preprocess_sync(proxy_dist, norm_scale):
     # it generates random samples from a normal distribution centered around proxy_dist with standard deviation norm_scale.
@@ -120,8 +156,9 @@ def set_diff(l1, l2):
 
 def prepare_distances(args, Oracle_emb, Proxy_emb, query_emb):
     """Prepare distances using the specified preprocessing method."""
-    Proxy_dist, _ = preprocess_dist(Oracle_emb, Proxy_emb, query_emb)
-    Oracle_dist = preprocess_sync(Proxy_dist, norm_scale)
+    Proxy_dist, Oracle_dist = preprocess_dist(
+            Oracle_emb, Proxy_emb, query_emb
+        )
     return Oracle_dist, Proxy_dist
 
 
@@ -176,7 +213,7 @@ def output_results(
     var_agg,
     avg_NN_S,
     avg_agg_S,
-    standard_error,
+    prec_rec_diff,
     avg_CI,
     avg_f1,
     avg_fix_f1,
@@ -194,11 +231,11 @@ def output_results(
         # Write the header (if it's not already present in the file)
         if seed == 1:
             file.write(
-                "seed\toptimal cost\tno optimal rt counts\tavg relative error\tavg absolute error\tavg acc\tavg recall\tavg precision\tavg f1\tavg fix recall\tavg fix precision\tavg fix f1\tagg ours\tvar ours\tNN ours\tagg_D\tstandard error\tNN S\tavg CI\tavg exec time\n"
+                "seed\toptimal cost\tno optimal rt counts\tavg relative error\tavg absolute error\tavg acc\tavg recall\tavg precision\tavg f1\tavg fix recall\tavg fix precision\tavg fix f1\tagg ours\tvar ours\tNN ours\tagg_D\tprec_rec_diff\tNN S\tavg CI\tavg exec time\n"
             )
 
         file.write(
-            f"{seed:}\t{args.optimal_cost}\t{cannot_times}\t{avg_error}\t{avg_absError}\t{avg_acc}\t{avg_rec}\t{avg_prec}\t{avg_f1}\t{avg_fix_rec}\t{avg_fix_prec}\t{avg_fix_f1}\t{avg_agg}\t{var_agg}\t{avg_NN_RT}\t{avg_agg_S}\t{standard_error}\t{avg_NN_S}\t{avg_CI}\t{avg_execution_time}\n"
+            f"{seed:}\t{args.optimal_cost}\t{cannot_times}\t{avg_error}\t{avg_absError}\t{avg_acc}\t{avg_rec}\t{avg_prec}\t{avg_f1}\t{avg_fix_rec}\t{avg_fix_prec}\t{avg_fix_f1}\t{avg_agg}\t{var_agg}\t{avg_NN_RT}\t{avg_agg_S}\t{prec_rec_diff}\t{avg_NN_S}\t{avg_CI}\t{avg_execution_time}\n"
         )
 
     verbose_print(

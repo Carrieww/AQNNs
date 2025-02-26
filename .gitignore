@@ -2,6 +2,7 @@
 /data/Amazon/TLSAN
 /data/Amazon/*.py
 /data/Amazon/*.sh
+/data/Jigsaw/prep/
 /data/Housing_price
 /data/Medical/eICU/eicu-collaborative-research-database-2
 /data/Medical/eICU/eicu-collaborative-research-database-2.0.zip
@@ -11,7 +12,7 @@
 /data/Video/jackson10000_attribute.csv
 /data/README.md
 /supg/data/
-figures.ipynb
+figures*
 
 /results
 /venv

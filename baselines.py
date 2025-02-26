@@ -7,7 +7,7 @@ from scipy.integrate import quad
 from hyper_parameter import std_offset
 from supg.supg.selector import ApproxQuery
 from supg.supg.experiments.experiment import run_experiment
-from util import array_union, set_diff, preprocess_topk_phi, verbose_print
+from aquapro_util import array_union, set_diff, preprocess_topk_phi, verbose_print
 
 
 def test_PQE(args, oracle_dist, proxy_dist, variant, variant_value):
@@ -46,7 +46,7 @@ def test_PQE(args, oracle_dist, proxy_dist, variant, variant_value):
     return precision, recall, None, ans, None, None
 
 
-@njit
+# @njit
 def PQA_PT(oracle_dist, phi, topk, t=0.9, prob=0.9, pt=0.9, pilots=None):
     true_ans = np.where(oracle_dist <= t)[0]
     if len(true_ans) == 0:
@@ -288,7 +288,7 @@ def SUPG(oracle_dist, proxy_dist, t, primary_target, p, cost, query_type):
                 delta=1 - p,
                 budget=cost,
             ),
-            "selector": "ImportancePrecisionTwoStageSelector",
+            "selector": "ImportancePrecisionSelector",
             "num_trials": 1,
         }
     else:
