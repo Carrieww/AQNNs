@@ -9,7 +9,7 @@ from numba import njit
 from scipy.spatial.distance import cdist
 from scipy.stats import norm, truncnorm
 
-from hyper_parameter import norm_scale
+norm_scale = 0.1
 
 sns.set_theme(style="ticks")
 
@@ -98,15 +98,6 @@ def load_data(args):
         oracle_pred = np.array(get_data(filename=filename_truth))
 
         return proxy_pred, oracle_pred
-    elif name in ["Amazon-HH", "Amazon-E"]:
-        filename_pred = f"data/Amazon/{name}/" + name + ".pred"
-        filename_truth = f"data/Amazon/{name}/" + name + ".truth"
-
-        proxy_pred = np.array(get_data(filename=filename_pred))
-        oracle_pred_data = get_data(filename=filename_truth)
-        oracle_pred = [item[1] for item in oracle_pred_data]
-        oracle_pred = np.array(oracle_pred)
-        return proxy_pred, oracle_pred
     elif name in ["yelp"]:
         filename_pred = f"data/{name}/" + name + "_test_minilm_s_embeddings.pred"
         filename_truth = f"data/{name}/" + name + "_test_minilm_embeddings.truth"
@@ -133,10 +124,6 @@ def load_data(args):
         oracle_pred = np.array(get_data(filename=filename_truth))
 
         return proxy_pred, oracle_pred
-    elif name == "Jackson":
-        filename = f"data/Video/jackson10000_attribute.csv"
-        df = pd.read_csv(filename)
-        return np.vstack(np.array(df["proxy_score"])), np.vstack(np.array(df["label"]))
     else:
         raise Exception("The dataset is not implemented yet")
 

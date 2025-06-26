@@ -6,7 +6,9 @@ from numba import njit
 from scipy.integrate import quad
 from scipy.stats import norm
 
-from hyper_parameter import std_offset
+norm_scale = 0.1
+std_offset = 0.01
+
 from supg.supg.experiments.experiment import run_experiment
 from supg.supg.selector import ApproxQuery
 from util import array_union, preprocess_topk_phi, set_diff, verbose_print

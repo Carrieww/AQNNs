@@ -75,14 +75,6 @@ class DataProcessor:
         if self.args.Fname in ["eICU", "MIMIC-III"]:
             attr_filename = f"data/Medical/{self.args.Fname}/{self.args.Fname}.testfull"
             self.args.ori_D_attr = get_data(filename=attr_filename)
-        elif self.args.Fname in ["Amazon-HH", "Amazon-E"]:
-            attr_filename = f"data/Amazon/{self.args.Fname}/{self.args.Fname}.testfull"
-            self.args.ori_D_attr = get_data(filename=attr_filename)
-        elif self.args.Fname in ["Jackson"]:
-            attr_filename = f"data/Video/jackson10000_attribute_normal.csv"
-            df = pd.read_csv(attr_filename)
-            self.args.ori_D_attr = np.vstack(np.array(df["attribute_list"])).tolist()
-            self.args.ori_D_attr = [["", "", item] for item in self.args.ori_D_attr]
         elif self.args.Fname in ["Jigsaw"]:
             attr_filename = f"data/{self.args.Fname}/{self.args.Fname}_attribute.csv"
             df = pd.read_csv(attr_filename)
