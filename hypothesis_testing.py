@@ -1,6 +1,7 @@
-from scipy.stats import norm
-from scipy import stats
 import numpy as np
+from scipy import stats
+from scipy.stats import norm
+
 from util import verbose_print
 
 

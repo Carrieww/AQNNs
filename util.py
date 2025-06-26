@@ -1,13 +1,15 @@
-import time
-import scipy
 import pickle
+import time
+
 import numpy as np
 import pandas as pd
+import scipy
 import seaborn as sns
 from numba import njit
-from hyper_parameter import norm_scale
-from scipy.stats import truncnorm, norm
 from scipy.spatial.distance import cdist
+from scipy.stats import norm, truncnorm
+
+from hyper_parameter import norm_scale
 
 sns.set_theme(style="ticks")
 
@@ -33,9 +35,12 @@ def get_data(filename=None, is_text=False):
 
     return instance_list
 
-def create_semi_synthetic_data(original_oracle, original_proxy,original_attr, factor=10, noise_level=0.01):
+
+def create_semi_synthetic_data(
+    original_oracle, original_proxy, original_attr, factor=10, noise_level=0.01
+):
     if factor == 0:
-        return original_proxy, original_oracle,original_attr
+        return original_proxy, original_oracle, original_attr
 
     # Assume original_data is a numpy array
     synthetic_o = []
@@ -43,7 +48,9 @@ def create_semi_synthetic_data(original_oracle, original_proxy,original_attr, fa
     synthetic_attr = []
     for _ in range(factor):
         # Bootstrap sample with replacement
-        sample_ind = np.random.choice(range(len(original_oracle)), size=len(original_oracle), replace=True)
+        sample_ind = np.random.choice(
+            range(len(original_oracle)), size=len(original_oracle), replace=True
+        )
         sample_oracle = original_oracle[sample_ind]
         sample_proxy = original_proxy[sample_ind]
         if len(original_attr) == 0:
@@ -52,8 +59,13 @@ def create_semi_synthetic_data(original_oracle, original_proxy,original_attr, fa
             sample_attr = [original_attr[i] for i in sample_ind]
 
         # Add random noise
-        noisy_sample_o = sample_oracle + np.random.normal(0, noise_level, size=sample_oracle.shape)
-        noisy_sample_p = sample_proxy + np.random.normal(0, noise_level, size=sample_proxy.shape)
+        noisy_sample_o = sample_oracle + np.random.normal(
+            0, noise_level, size=sample_oracle.shape
+        )
+        noisy_sample_p = sample_proxy + np.random.normal(
+            0, noise_level, size=sample_proxy.shape
+        )
+        # noisy_sample_attr = sample_attr + np.random.normal(0, noise_level, size=len(sample_attr))
 
         synthetic_o.append(noisy_sample_o)
         synthetic_p.append(noisy_sample_p)
@@ -62,14 +74,18 @@ def create_semi_synthetic_data(original_oracle, original_proxy,original_attr, fa
         else:
             synthetic_attr = synthetic_attr + sample_attr
     # Concatenate to form a larger dataset
-    combined_oracle = np.concatenate((original_oracle, np.concatenate(synthetic_o, axis=0)), axis=0)
-    combined_proxy = np.concatenate((original_proxy, np.concatenate(synthetic_p, axis=0)), axis=0)
+    combined_oracle = np.concatenate(
+        (original_oracle, np.concatenate(synthetic_o, axis=0)), axis=0
+    )
+    combined_proxy = np.concatenate(
+        (original_proxy, np.concatenate(synthetic_p, axis=0)), axis=0
+    )
     if len(original_attr) == 0:
-        combined_attr=[]
+        combined_attr = []
     else:
-        combined_attr = original_attr+synthetic_attr
+        combined_attr = original_attr + synthetic_attr
 
-    return combined_proxy, combined_oracle,combined_attr
+    return combined_proxy, combined_oracle, combined_attr
 
 
 def load_data(args):
@@ -87,10 +103,27 @@ def load_data(args):
         filename_truth = f"data/Amazon/{name}/" + name + ".truth"
 
         proxy_pred = np.array(get_data(filename=filename_pred))
-        # proxy_pred = np.array([item[1] for item in proxy_pred])
         oracle_pred_data = get_data(filename=filename_truth)
         oracle_pred = [item[1] for item in oracle_pred_data]
         oracle_pred = np.array(oracle_pred)
+        return proxy_pred, oracle_pred
+    elif name in ["yelp"]:
+        filename_pred = f"data/{name}/" + name + "_test_minilm_s_embeddings.pred"
+        filename_truth = f"data/{name}/" + name + "_test_minilm_embeddings.truth"
+
+        proxy_pred = np.array(get_data(filename=filename_pred))
+        oracle_pred = np.array(get_data(filename=filename_truth))
+        return proxy_pred, oracle_pred
+    elif name in ["Electronics"]:
+        filename_pred = (
+            f"data/Amazon/{name}/" + name + "_amazon_test_minilm_s_embeddings.pred"
+        )
+        filename_truth = (
+            f"data/Amazon/{name}/" + name + "_amazon_test_minilm_embeddings.truth"
+        )
+
+        proxy_pred = np.array(get_data(filename=filename_pred))
+        oracle_pred = np.array(get_data(filename=filename_truth))
         return proxy_pred, oracle_pred
     elif name == "Jigsaw":
         filename_pred = f"data/{name}/" + name + ".pred"
@@ -120,7 +153,17 @@ def preprocess_dist(oracle, proxy, query):
     nan2mean(proxy_dist)
     nan2mean(oracle_dist)
 
+    # if max(proxy_dist) > 1 or min(proxy_dist) < 0, then normalize proxy_dist to be between 0 and 1
+    if np.max(proxy_dist) > 1 or np.min(proxy_dist) < 0:
+        proxy_dist = (proxy_dist - np.min(proxy_dist)) / (
+            np.max(proxy_dist) - np.min(proxy_dist)
+        )
+        oracle_dist = (oracle_dist - np.min(oracle_dist)) / (
+            np.max(oracle_dist) - np.min(oracle_dist)
+        )
+
     return proxy_dist, oracle_dist
+
 
 def preprocess_topk_phi(proxy_dist, norm_scale, t):
     # This code finds the percentile rank of value t in a normal distribution with mean proxy_dist and standard deviation norm_scale.
@@ -130,6 +173,7 @@ def preprocess_topk_phi(proxy_dist, norm_scale, t):
     phi = np.array([i[1] for i in topk2phi])
 
     return topk, phi
+
 
 def preprocess_sync(proxy_dist, norm_scale):
     # it generates random samples from a normal distribution centered around proxy_dist with standard deviation norm_scale.
@@ -156,9 +200,9 @@ def set_diff(l1, l2):
 
 def prepare_distances(args, Oracle_emb, Proxy_emb, query_emb):
     """Prepare distances using the specified preprocessing method."""
-    Proxy_dist, Oracle_dist = preprocess_dist(
-            Oracle_emb, Proxy_emb, query_emb
-        )
+    Proxy_dist, Oracle_dist = preprocess_dist(Oracle_emb, Proxy_emb, query_emb)
+    # Proxy_dist, _ = preprocess_dist(Oracle_emb, Proxy_emb, query_emb)
+    # Oracle_dist = preprocess_sync(Proxy_dist, norm_scale)
     return Oracle_dist, Proxy_dist
 
 
@@ -173,7 +217,7 @@ def is_int(string):
 def agg_value(D, ind_list, attr_id, agg):
     l = []
     for ans_id in ind_list:
-        value = D[ans_id][2][attr_id]
+        value = D[int(ans_id)][2][attr_id]
         if is_int(value):
             value = float(value)
             if not np.isnan(value):
@@ -191,6 +235,22 @@ def agg_value(D, ind_list, attr_id, agg):
         else:
             mean = sum(l) / len(l)
             res = sum((x - mean) ** 2 for x in l) / len(l)
+    elif agg == "min":
+        res = np.nan if len(l) == 0 else min(l)
+    elif agg == "max":
+        res = np.nan if len(l) == 0 else max(l)
+    elif agg == "median":
+        if len(l) == 0:
+            res = np.nan
+        else:
+            sorted_l = sorted(l)
+            n = len(sorted_l)
+            if n % 2 == 0:
+                res = (sorted_l[n // 2 - 1] + sorted_l[n // 2]) / 2
+            else:
+                res = sorted_l[n // 2]
+    elif agg == "count":
+        res = len(l)
     else:
         raise Exception(f"The case for {agg} has not been implemented yet")
     return l, res

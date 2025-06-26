@@ -1,13 +1,15 @@
+from math import ceil, floor
+
 import numpy as np
 import pandas as pd
 from numba import njit
-from math import floor, ceil
-from scipy.stats import norm
 from scipy.integrate import quad
+from scipy.stats import norm
+
 from hyper_parameter import std_offset
-from supg.supg.selector import ApproxQuery
 from supg.supg.experiments.experiment import run_experiment
-from aquapro_util import array_union, set_diff, preprocess_topk_phi, verbose_print
+from supg.supg.selector import ApproxQuery
+from util import array_union, preprocess_topk_phi, set_diff, verbose_print
 
 
 def test_PQE(args, oracle_dist, proxy_dist, variant, variant_value):
@@ -46,11 +48,11 @@ def test_PQE(args, oracle_dist, proxy_dist, variant, variant_value):
     return precision, recall, None, ans, None, None
 
 
-# @njit
+@njit
 def PQA_PT(oracle_dist, phi, topk, t=0.9, prob=0.9, pt=0.9, pilots=None):
     true_ans = np.where(oracle_dist <= t)[0]
     if len(true_ans) == 0:
-        return 0, 0, true_ans
+        return 0, np.inf, true_ans
 
     pbs = np.zeros(len(phi) + 1)
     k_star = 0
@@ -79,6 +81,10 @@ def PQA_PT(oracle_dist, phi, topk, t=0.9, prob=0.9, pt=0.9, pilots=None):
         ans = set_diff(array_union(topk[:k_star], pilots), pilots_false)
 
     true_pos = len(np.intersect1d(ans, true_ans))
+
+    if len(ans) == 0:
+        # verbose_print(args, "No answer found by PQA-PT")
+        return np.inf, 0, ans
     precision = true_pos / len(ans)
     recall = true_pos / len(true_ans)
 
@@ -89,7 +95,7 @@ def PQA_PT(oracle_dist, phi, topk, t=0.9, prob=0.9, pt=0.9, pilots=None):
 def PQA_RT(oracle_dist, phi, topk, t=0.9, prob=0.9, rt=0.9, pilots=None):
     true_ans = np.where(oracle_dist <= t)[0]
     if len(true_ans) == 0:
-        return 0, 0, true_ans
+        return 0, np.inf, true_ans
 
     L = 1
     R = len(phi)
@@ -144,6 +150,9 @@ def PQA_RT(oracle_dist, phi, topk, t=0.9, prob=0.9, rt=0.9, pilots=None):
         ans = set_diff(array_union(topk[:k_star], pilots), pilots_false)
 
     true_pos = len(np.intersect1d(ans, true_ans))
+    if len(ans) == 0:
+        # verbose_print(args, "No answer found by PQA-RT")
+        return np.inf, 0, ans
     precision = true_pos / len(ans)
     recall = true_pos / len(true_ans)
 
