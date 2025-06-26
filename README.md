@@ -36,7 +36,7 @@ The experiments use the following datasets:
    git clone https://github.com/yourusername/our-repo.git
    cd your-repo
    ```
-
+   
 2. Install dependencies:
    ```bash
    pip install -r requirements.txt
@@ -48,11 +48,11 @@ To reproduce the experimental results from the paper:
 
 ```bash
 # Run all experiments
-./myscript.sh
+   ./myscript.sh
 
 # Or run individual experiments
 python main.py --algo SPRinT-V --agg avg --Fname MIMIC-III
-```
+   ```
 
 ## Results
 

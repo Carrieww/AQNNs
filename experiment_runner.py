@@ -7,6 +7,8 @@ from hypothesis_testing import HT_acc_t_test, HT_acc_z_test, one_proportion_z_te
 from sprint import SPRinTRunner
 from util import agg_value, compute_f1_score, verbose_print
 
+norm_scale = 0.1
+
 
 class ExperimentRunner:
     """
@@ -99,7 +101,6 @@ class ExperimentRunner:
 
     def _run_topk(self, oracle_dist_S, proxy_dist_S):
         """Run TopK algorithm."""
-        from hyper_parameter import norm_scale
 
         prec, rec, optimal_cost, ANS = test_topk(
             oracle_dist=oracle_dist_S,

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-python_script="SPRinT.py"
+python_script="main.py"
 
 # Define parameter values
 agg_list=("avg" "var" "pct" "sum" "min" "max" "median" "count") 
