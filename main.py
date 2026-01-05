@@ -32,7 +32,7 @@ def main():
     # Run experiments for 10 seeds from 1 to 10
     # we use seed = 2024 for scalability experiments
     brute_force_time_l = []
-    for seed in [2024]: 
+    for seed in range(1, 11): 
         args.optimal_cost = None
         np.random.seed(seed)
 

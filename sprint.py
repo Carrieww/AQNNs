@@ -1,5 +1,4 @@
 from math import ceil
-import time
 
 import numpy as np
 from numba import njit

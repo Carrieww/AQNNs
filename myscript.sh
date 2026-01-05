@@ -5,7 +5,7 @@ python_script="main.py"
 # Define parameter values
 agg_list=("all") 
 
-fname_list=("eICU" "MIMIC-III" "Jigsaw" "yelp" "Electronics") #"Electronics_L12_L3" "Electronics_L6_L3"
+fname_list=("MIMIC-III") #"Electronics_L12_L3" "Electronics_L6_L3" "eICU" "Jigsaw" "yelp" "Electronics"
 algo_list=("SPRinT-V") #  "SPRinT-V" "PQA-PT" "PQA-RT" "SUPG-PT" "SUPG-RT" "TopK"
 file_suffix="test0105"
 scalability_factor=0
