@@ -59,18 +59,6 @@ SPRinT-C consistently achieves the lowest relative error (RE) across all dataset
 </p>
 </div>
 
-<h2>Datasets</h2>
-
-<div style="text-align: justify;">
-<p>We evaluate our methods on the following real-world datasets:</p>
-<ul>
-  <li><strong>Medical Datasets</strong>: eICU, MIMIC-III</li>
-  <li><strong>E-commerce Datasets</strong>: Yelp, Electronics (Amazon)</li>
-  <li><strong>Social Media Datasets</strong>: Jigsaw</li>
-</ul>
-<p>Each dataset includes embeddings (proxy and oracle) and associated attributes for aggregation queries.</p>
-</div>
-
 <h2>Citation</h2>
 
 <pre><code>@inproceedings{wang2026efficient,
