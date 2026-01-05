@@ -30,7 +30,7 @@ This repository implements several algorithms for solving Aggregation Queries ov
 
 ### Our framework
 
-![Framework](img/framework.pdf)
+![Framework](img/framework.png)
 
 ### Our algorithms
 
