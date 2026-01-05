@@ -9,13 +9,6 @@ def parse_args():
     parser.add_argument("--s_p", type=int, default=150, help="Pilot sample size.")
     parser.add_argument("--s", type=int, default=500, help="Sample size.")
     parser.add_argument(
-        "--hypothesis_type",
-        type=str,
-        default="NNH",
-        choices=["NNH", "P-NNH"],
-        help="For AVG, NNH is recommended. For PCT, P-NNH is recommended.",
-    )
-    parser.add_argument(
         "--algo",
         type=str,
         default="SPRinT-V",
@@ -33,8 +26,8 @@ def parse_args():
     parser.add_argument(
         "--agg",
         type=str,
-        default="avg",
-        choices=["avg", "pct", "var", "sum", "min", "max", "median", "count"],
+        default="all",
+        choices=["all", "avg", "pct", "var", "sum"],
         help="Choose an aggregation function.",
     )
     parser.add_argument(
@@ -62,13 +55,15 @@ def parse_args():
             "Jigsaw",
             "yelp",
             "Electronics",
+            "Electronics_L12_L3",
+            "Electronics_L6_L3",
         ],
         help="Choose a dataset.",
     )
     parser.add_argument("--num_query", type=int, default=1, help="Number of queries.")
     parser.add_argument("--beta", type=float, default=1, help="Fbeta score coefficient")
-    parser.add_argument("--num_sample", type=int, default=30, help="Number of samples.")
-    parser.add_argument("--Dist_t", type=float, default=0.9, help="Distance threshold.")
+    parser.add_argument("--num_sample", type=int, default=2, help="Number of samples.")
+    parser.add_argument("--Dist_t", type=float, default=0.6, help="Distance threshold.")
     parser.add_argument(
         "--Prob", type=float, default=0.9, help="Probability threshold."
     )

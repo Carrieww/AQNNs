@@ -222,24 +222,8 @@ def agg_value(D, ind_list, attr_id, agg):
         else:
             mean = sum(l) / len(l)
             res = sum((x - mean) ** 2 for x in l) / len(l)
-    elif agg == "min":
-        res = np.nan if len(l) == 0 else min(l)
-    elif agg == "max":
-        res = np.nan if len(l) == 0 else max(l)
-    elif agg == "median":
-        if len(l) == 0:
-            res = np.nan
-        else:
-            sorted_l = sorted(l)
-            n = len(sorted_l)
-            if n % 2 == 0:
-                res = (sorted_l[n // 2 - 1] + sorted_l[n // 2]) / 2
-            else:
-                res = sorted_l[n // 2]
-    elif agg == "count":
-        res = len(l)
     else:
-        raise Exception(f"The case for {agg} has not been implemented yet")
+        raise Exception(f"The case for agg: {agg} has not been implemented yet")
     return l, res
 
 
@@ -255,7 +239,7 @@ def output_results(
     avg_execution_time,
     avg_error,
     avg_absError,
-    avg_NN_RT,
+    avg_NN_algo,
     avg_agg,
     var_agg,
     avg_NN_S,
@@ -278,11 +262,11 @@ def output_results(
         # Write the header (if it's not already present in the file)
         if seed == 1:
             file.write(
-                "seed\toptimal cost\tno optimal rt counts\tavg relative error\tavg absolute error\tavg acc\tavg recall\tavg precision\tavg f1\tavg fix recall\tavg fix precision\tavg fix f1\tagg ours\tvar ours\tNN ours\tagg_D\tprec_rec_diff\tNN S\tavg CI\tavg exec time\n"
+                "seed\toptimal cost\tno optimal rt counts\tavg relative error\tavg absolute error\tavg acc\tavg recall\tavg precision\tavg f1\tavg fix recall\tavg fix precision\tavg fix f1\tagg ours\tvar ours\tNN by algo\tagg_D\tprec_rec_diff\tNN S\tavg CI\tavg exec time\n"
             )
 
         file.write(
-            f"{seed:}\t{args.optimal_cost}\t{cannot_times}\t{avg_error}\t{avg_absError}\t{avg_acc}\t{avg_rec}\t{avg_prec}\t{avg_f1}\t{avg_fix_rec}\t{avg_fix_prec}\t{avg_fix_f1}\t{avg_agg}\t{var_agg}\t{avg_NN_RT}\t{avg_agg_S}\t{prec_rec_diff}\t{avg_NN_S}\t{avg_CI}\t{avg_execution_time}\n"
+            f"{seed:}\t{args.optimal_cost}\t{cannot_times}\t{avg_error}\t{avg_absError}\t{avg_acc}\t{avg_rec}\t{avg_prec}\t{avg_f1}\t{avg_fix_rec}\t{avg_fix_prec}\t{avg_fix_f1}\t{avg_agg}\t{var_agg}\t{avg_NN_algo}\t{avg_agg_S}\t{prec_rec_diff}\t{avg_NN_S}\t{avg_CI}\t{avg_execution_time}\n"
         )
 
     verbose_print(

@@ -1,4 +1,5 @@
 import copy
+import time
 
 import numpy as np
 import pandas as pd
@@ -38,37 +39,41 @@ class DataProcessor:
             float(self.args.fac_list.split(",")[2]),
         )
 
+        # Determine aggregation types based on algorithm
+        if self.args.agg == "all":
+            self.args.agg_types = ["avg", "var", "pct", "sum"]
+        else:
+            self.args.agg_types = [self.args.agg]
+
         verbose_print(
             self.args,
             f"Prob: {self.args.Prob}; r: {self.args.Dist_t}; beta: {self.args.beta}",
         )
         verbose_print(
             self.args,
-            f"Dataset: {self.args.Fname}, size: {Proxy_emb.shape} , aggregation function: {self.args.agg}, filename: {self.args.file_suffix}, s: {self.args.s}, s_p: {self.args.s_p}",
+            f"Dataset: {self.args.Fname}, size: {Proxy_emb.shape}, filename: {self.args.file_suffix}, s: {self.args.s}, s_p: {self.args.s_p}",
         )
+        verbose_print(self.args, f"Aggregation types for {self.args.algo}: {self.args.agg_types}")
 
         # Handle hypothesis-specific setup
         self._setup_hypothesis_data()
 
         # Create semi-synthetic data
-        Proxy_emb, Oracle_emb = self._create_synthetic_data(Proxy_emb, Oracle_emb)
+        if self.args.agg == "all":
+            verbose_print(self.args, f"CANNOT create semi-synthetic data for all aggregation types: {self.args.agg}")
+            pass
+        else:
+            Proxy_emb, Oracle_emb = self._create_synthetic_data(Proxy_emb, Oracle_emb)
 
         return Proxy_emb, Oracle_emb
 
     def _setup_hypothesis_data(self):
         """Setup hypothesis-specific data based on aggregation type."""
-        if self.args.agg == "pct":
-            self.args.attr = "proportion"
-        elif self.args.agg == "count":
-            self.args.attr = "count"
-        elif self.args.agg in ["avg", "var", "sum", "min", "max", "median"]:
-            self._load_attribute_data()
-            verbose_print(
-                self.args,
-                f"H1: {self.args.agg} {self.args.attr} (ind = {self.args.attr_id}) of NNs of q is tested.",
+        self._load_attribute_data()
+        verbose_print(
+            self.args,
+            f"H1: {self.args.agg_types} {self.args.attr} (ind = {self.args.attr_id}) of NNs of q is tested.",
             )
-        else:
-            raise ValueError("Unknown aggregation function specified in args.agg")
 
     def _load_attribute_data(self):
         """Load attribute data based on dataset."""
@@ -81,15 +86,14 @@ class DataProcessor:
             self.args.ori_D_attr = np.vstack(np.array(df["no_downvote"])).tolist()
             self.args.ori_D_attr = [["", "", item] for item in self.args.ori_D_attr]
         elif self.args.Fname in ["yelp"]:
+            # here we only use the first 10,000 rows of the yelp dataset
             attr_filename = f"data/{self.args.Fname}/{self.args.Fname}_test.csv"
             df = pd.read_csv(attr_filename, header=None, names=["rating", "text"])
             self.args.ori_D_attr = np.vstack(np.array(df["rating"])).tolist()
             self.args.ori_D_attr = [["", "", item] for item in self.args.ori_D_attr]
-        elif self.args.Fname in ["Electronics"]:
-            attr_filename = (
-                f"data/Amazon/{self.args.Fname}/{self.args.Fname}_amazon_test.csv"
-            )
-            df = pd.read_csv(attr_filename, header=None, names=["rating", "text"])
+        elif self.args.Fname in ["Electronics", "Electronics_L12_L3", "Electronics_L6_L3"]:
+            attr_filename = f"data/Amazon/Electronics/Electronics_amazon_test.csv"
+            df = pd.read_csv(attr_filename, header=None, names=['rating', 'text'])
             self.args.ori_D_attr = np.vstack(np.array(df["rating"])).tolist()
             self.args.ori_D_attr = [["", "", item] for item in self.args.ori_D_attr]
         else:
@@ -97,7 +101,7 @@ class DataProcessor:
 
     def _create_synthetic_data(self, Proxy_emb, Oracle_emb):
         """Create semi-synthetic data based on aggregation type."""
-        if self.args.agg in ["pct", "count"]:
+        if self.args.agg in ["pct"]:
             Proxy_emb, Oracle_emb, _ = create_semi_synthetic_data(
                 Oracle_emb,
                 Proxy_emb,
@@ -105,7 +109,7 @@ class DataProcessor:
                 factor=self.args.scalability_factor,
                 noise_level=0.001,
             )
-        elif self.args.agg in ["avg", "var", "sum", "min", "max", "median"]:
+        elif self.args.agg in ["avg", "var", "sum"]:
             Proxy_emb, Oracle_emb, self.args.ori_D_attr = create_semi_synthetic_data(
                 Oracle_emb,
                 Proxy_emb,
@@ -153,46 +157,50 @@ class DataProcessor:
             self.args, Oracle_emb, Proxy_emb, query_emb
         )
 
+        brute_force_time_start = time.time()
+
         # Calculate ground truth
         self.args.true_ans_D = np.where(Oracle_dist <= self.args.Dist_t)[0]
         self._calculate_ground_truth_aggregation(Oracle_emb, Oracle_dist)
+        brute_force_time = time.time() - brute_force_time_start
 
-        return Oracle_dist, Proxy_dist
+        return Oracle_dist, Proxy_dist, brute_force_time
 
     def _calculate_ground_truth_aggregation(self, Oracle_emb, Oracle_dist):
-        """Calculate ground truth aggregation values."""
-        if self.args.agg == "pct":
-            self.args.agg_D = len(self.args.true_ans_D) / Oracle_dist.shape[0]
-            verbose_print(
-                self.args,
-                f"Ground Truth NN is {len(self.args.true_ans_D)}, proportion is {self.args.agg_D}",
-            )
-        elif self.args.agg == "count":
-            self.args.agg_D = len(self.args.true_ans_D)
-            verbose_print(
-                self.args,
-                f"Ground Truth NN is {len(self.args.true_ans_D)}, count is {self.args.agg_D}",
-            )
-        elif self.args.agg in ["avg", "var", "sum", "min", "max", "median"]:
-            self.args.l_D, self.args.agg_D = agg_value(
-                self.args.ori_D_attr,
-                self.args.true_ans_D,
-                self.args.attr_id,
-                self.args.agg,
-            )
+        """Calculate ground truth aggregation values for each aggregation type."""
+        self.args.agg_D_dict = {}
+        self.args.l_D_dict = {}
+        for agg in self.args.agg_types:
+            if agg == "pct":
+                self.args.agg_D_dict[agg] = len(self.args.true_ans_D) / Oracle_dist.shape[0]
+                verbose_print(
+                    self.args,
+                    f"[{agg}] Ground Truth NN is {len(self.args.true_ans_D)}, proportion is {self.args.agg_D_dict[agg]}",
+                )
+            elif agg in ["avg", "var", "sum"]:
+                self.args.l_D_dict[agg], self.args.agg_D_dict[agg] = agg_value(
+                    self.args.ori_D_attr,
+                    self.args.true_ans_D,
+                    self.args.attr_id,
+                    agg,
+                )
 
-            l_D_full, agg_D_full = agg_value(
-                self.args.ori_D_attr,
-                range(len(self.args.ori_D_attr)),
-                self.args.attr_id,
-                self.args.agg,
-            )
-            print(f"agg_D: {self.args.agg_D}, agg_D_full: {agg_D_full}")
-            self.args.D_attr = copy.deepcopy(self.args.ori_D_attr)
+                _, agg_D_full = agg_value(
+                    self.args.ori_D_attr,
+                    range(len(self.args.ori_D_attr)),
+                    self.args.attr_id,
+                    agg,
+                )
+                verbose_print(self.args, f"[{agg}] agg_D: {self.args.agg_D_dict[agg]}, agg_D_full: {agg_D_full}")
+                self.args.D_attr = copy.deepcopy(self.args.ori_D_attr)
 
-            verbose_print(
-                self.args,
-                f"Ground Truth NN is {len(self.args.true_ans_D)} ({round(len(self.args.true_ans_D) / len(Oracle_emb), 4) * 100}%), aggregation is {self.args.agg_D}",
-            )
-        else:
-            raise ValueError("Unknown aggregation function specified in args.agg")
+                verbose_print(
+                    self.args,
+                    f"Ground Truth NN is {len(self.args.true_ans_D)} ({round(len(self.args.true_ans_D) / len(Oracle_emb), 4) * 100}%), aggregation is {self.args.agg_D_dict[agg]}",
+                )
+            else:
+                raise ValueError(f"Unknown aggregation function: {agg}")
+        
+        # set the first aggregation type as the default aggregation type
+        self.args.agg_D = self.args.agg_D_dict[self.args.agg_types[0]]
+        self.args.l_D = self.args.l_D_dict[self.args.agg_types[0]]

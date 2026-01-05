@@ -1,4 +1,5 @@
 from math import ceil
+import time
 
 import numpy as np
 from numba import njit
@@ -88,7 +89,7 @@ def SPRinT(Dist_t, Prob, fix_sample, oracle_dist, phi, topk, pt=0.9, pilots=None
     return precision, recall, k_star, ans, fix_precision, fix_recall
 
 
-def test_SPRinT(args, oracle_dist, proxy_dist, pt, find_rt=True):
+def test_SPRinT(args, oracle_dist, proxy_dist, pt, find_pt=True):
     """
     Test SPRinT algorithm with given parameters.
 
@@ -97,12 +98,12 @@ def test_SPRinT(args, oracle_dist, proxy_dist, pt, find_rt=True):
         oracle_dist: Oracle distances
         proxy_dist: Proxy distances
         pt: Precision threshold
-        find_rt: Whether to find optimal recall target
+        find_pt: Whether to find optimal precision target
 
     Returns:
         precision, recall, k_star, ans, fix_prec, fix_rec
     """
-    if find_rt:
+    if find_pt:
         args.samples = None
     else:
         args.samples = args.fix_sample
@@ -155,7 +156,7 @@ def f1_score(args, t, oracle_dist_S, proxy_dist_S):
         return compute_f1_score(args, fix_prec, fix_rec)
 
 
-def find_optimal_rt(args, oracle_dist_S, proxy_dist_S, rt=0.0001):
+def find_optimal_pt(args, oracle_dist_S, proxy_dist_S, pt=0.0001):
     """
     Find optimal recall target based on algorithm type.
 
@@ -163,7 +164,7 @@ def find_optimal_rt(args, oracle_dist_S, proxy_dist_S, rt=0.0001):
         args: Arguments object
         oracle_dist_S: Oracle distances for subset S
         proxy_dist_S: Proxy distances for subset S
-        rt: Initial recall target
+        pt: Initial precision target
 
     Returns:
         optimal_t, CANNOT flag
@@ -173,32 +174,32 @@ def find_optimal_rt(args, oracle_dist_S, proxy_dist_S, rt=0.0001):
     if args.algo == "SPRinT-C":
         # Cost-based optimization
         max_t = 1
-        min_t = rt
+        min_t = pt
         fix_rec = 1
         fix_prec = 0
         while abs(fix_rec - fix_prec) > 0.0001 or (fix_prec == 0 and fix_rec == 0):
-            rt = (max_t + min_t) / 2
-            verbose_print(args, f"---------- finding rt: {rt} ----------")
+            pt = (max_t + min_t) / 2
+            verbose_print(args, f"---------- finding pt: {pt} ----------")
 
             _, _, _, ans, fix_prec, fix_rec = test_SPRinT(
-                args, oracle_dist_S, proxy_dist_S, rt
+                args, oracle_dist_S, proxy_dist_S, pt
             )
 
             if fix_prec < fix_rec:
-                min_t = rt
+                min_t = pt
             else:
-                max_t = rt
+                max_t = pt
 
             if abs(min_t - max_t) < 0.0001:
-                verbose_print(args, "CANNOT find optimal rt!!")
+                verbose_print(args, "CANNOT find optimal pt!!")
                 CANNOT = 1
                 break
             verbose_print(
                 args,
-                f"rt = {rt}: Found NN: {len(ans)}, Pilot Precision {fix_prec}, Pilot Recall {fix_rec}",
+                f"pt = {pt}: Found NN: {len(ans)}, Pilot Precision {fix_prec}, Pilot Recall {fix_rec}",
             )
 
-        optimal_t = rt
+        optimal_t = pt
         verbose_print(
             args,
             f"Found optimal recall target={optimal_t} with fix prec {fix_prec} and fix rec {fix_rec}",
@@ -212,7 +213,7 @@ def find_optimal_rt(args, oracle_dist_S, proxy_dist_S, rt=0.0001):
         while right - left > tolerance:
             m1 = left + (right - left) / 3
             m2 = right - (right - left) / 3
-            verbose_print(args, f"---------- finding rt between {m1, m2} ----------")
+            verbose_print(args, f"---------- finding pt between {m1, m2} ----------")
             f1_m1 = f1_score(args, m1, oracle_dist_S, proxy_dist_S)
             f1_m2 = f1_score(args, m2, oracle_dist_S, proxy_dist_S)
 
@@ -253,12 +254,12 @@ class SPRinTRunner:
         """
         self.args.optimal_cost = self.args.s_p
 
-        # Find optimal recall target
-        self.args.rt, CANNOT = find_optimal_rt(self.args, oracle_dist_S, proxy_dist_S)
+        # Find optimal precision target
+        self.args.pt, CANNOT = find_optimal_pt(self.args, oracle_dist_S, proxy_dist_S)
 
         # Run SPRinT algorithm
         prec, rec, _, ANS, fix_prec, fix_rec = test_SPRinT(
-            self.args, oracle_dist_S, proxy_dist_S, self.args.rt, find_rt=False
+            self.args, oracle_dist_S, proxy_dist_S, self.args.pt, find_pt=False
         )
 
         return prec, rec, _, ANS, fix_prec, fix_rec, CANNOT

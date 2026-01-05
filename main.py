@@ -29,8 +29,10 @@ def main():
     # Optional: Load predefined query indices for specific experiments
     query_index_list = None
 
-    # Run experiments for multiple seeds
-    for seed in range(1, 11):
+    # Run experiments for 10 seeds from 1 to 10
+    # we use seed = 2024 for scalability experiments
+    brute_force_time_l = []
+    for seed in [2024]: 
         args.optimal_cost = None
         np.random.seed(seed)
 
@@ -39,15 +41,65 @@ def main():
         )
 
         # Prepare query data
-        Oracle_dist, Proxy_dist = data_processor.prepare_query_data(
+        Oracle_dist, Proxy_dist, brute_force_time = data_processor.prepare_query_data(
             Oracle_emb, Proxy_emb, seed, query_index_list
         )
+        brute_force_time_l.append(brute_force_time)
+        verbose_print(args, f"Brute force time: {brute_force_time:.4f} seconds")
 
         # Run experiment
-        results = run_experiment(args, Oracle_dist, Proxy_dist, seed)
+        batch_results = run_experiment(args, Oracle_dist, Proxy_dist, seed)
 
-        # Output results
-        output_results(args, seed, *results)
+        # output results for each aggregation type
+        for agg_type, result_tuple in batch_results.items():
+            args.agg = agg_type
+            
+            (
+                avg_execution_time,
+                avg_error,
+                avg_absError,
+                avg_acc,
+                avg_rec,
+                avg_prec,
+                avg_fix_rec,
+                avg_fix_prec,
+                avg_NN_algo,
+                avg_agg,
+                var_agg,
+                avg_NN_S,
+                avg_agg_S,
+                prec_rec_diff,
+                avg_CI,
+                avg_f1,
+                avg_fix_f1,
+                cannot_times,
+            ) = result_tuple
+
+            # output results
+            output_results(
+                args,
+                seed,
+                avg_execution_time,
+                avg_error,
+                avg_absError,
+                avg_NN_algo,
+                avg_agg,
+                var_agg,
+                avg_NN_S,
+                avg_agg_S,
+                prec_rec_diff,
+                avg_CI,
+                avg_f1,
+                avg_fix_f1,
+                avg_acc,
+                avg_rec,
+                avg_prec,
+                avg_fix_rec,
+                avg_fix_prec,
+                cannot_times,
+            )
+
+    verbose_print(args, f"Average brute force time: {np.mean(brute_force_time_l):.4f} seconds")
 
 
 if __name__ == "__main__":
