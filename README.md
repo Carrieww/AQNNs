@@ -7,38 +7,32 @@ This repository contains the implementation and experimental data for the paper 
 Queries over Learned Representations**, accepted to **SIGMOD 2026**.
 
 
-### Citation
-
-If you use this code in your research, please cite:
-
-```bibtex
-@inproceedings{wang2026efficient,
-  title={On Efficient Approximate Aggregate Nearest Neighbor Queries over Learned Representations},
-  author={Wang, Carrie and Amer-Yahia, Sihem and Lakshmanan, Laks and Cheng, Reynold},
-  booktitle={ACM SIGMOD 2026},
-  year={2026}
-}
-```
-
 ## 📋 Table of Contents
 
 - [Problem Statement](#problem-statement)
 - [Algorithms](#algorithms)
 - [Datasets](#datasets)
+- [Results](#results)
 - [Installation](#installation)
 - [Quick Start](#quick-start)
 - [Configuration](#configuration)
-- [License](#license)
+- [Citation](#citation)
 
 ## 🎯 Problem Statement
 
-Given a query point `q` and a distance threshold `r`, we want to compute aggregation functions (e.g., average, variance, sum, proportion) over the attributes of points that are true nearest neighbors of `q` within distance `r`. The challenge is to efficiently compute these aggregations using a combination of an **oracle model** (accurate but expensive) and a **proxy model** (fast but less accurate) to balance accuracy and computational efficiency.
+Given a query point `q` and a radius `r`, we want to compute aggregation functions (e.g., average, variance, sum, proportion) over the attributes of points that are true nearest neighbors of `q` within `r`. 
+
+The challenge is to efficiently compute these aggregations using a combination of **oracle embeddings** (accurate but expensive) and **proxy embeddings** (fast but less accurate) to balance accuracy and computational efficiency.
 
 ## 🔬 Algorithms
 
 This repository implements several algorithms for solving Aggregation Queries over Predicted Nearest Neighbors (AQNNs):
 
-### Our Proposed Methods
+### Our framework
+
+![Framework](img/framework.pdf)
+
+### Our algorithms
 
 - **SPRinT-C** (SPRinT Count-sensitive): Our approach optimized for count-sensitive AQNNs (e.g., proportion queries)
 - **SPRinT-V** (SPRinT Value-sensitive): Our approach optimized for value-sensitive AQNNs (e.g., average, variance, sum queries)
@@ -59,6 +53,16 @@ The experiments use the following real-world datasets:
 - **Jigsaw**: Jigsaw toxic comment classification dataset
 
 Each dataset includes embeddings (proxy and oracle) and associated attributes for aggregation queries.
+
+## 📈 Results
+
+![Embedding Generation Cost](img/embedding_generation_cost.png)
+
+SPRinT achieves 4.5–186.4× speedup by using proxy models for a small fraction of objects to avoid the majority of expensive oracle calls.
+
+![Relative Error Performance](img/RE_performance.png)
+
+SPRinT-C consistently achieves the lowest relative error (RE) across all datasets. The Two-Phase strategy (combining SPRinT-V and SPRinT-C) also consistently achieves the lowest RE across all datasets, while SPRinT-V performs best on AVG and VAR aggregations for Amazon-E.
 
 ## 🚀 Installation
 
@@ -148,12 +152,22 @@ Each result file contains detailed metrics including:
 
 Detailed results and analysis can be found in the paper.
 
-## 📄 License
-
-This project is licensed under the MIT License.
 
 ## 🙏 Acknowledgments
 
 We thank the authors of the baseline methods (PQA, SUPG) and the providers of the datasets used in our experiments.
 
 **For questions or issues, please refer to the paper or contact the authors.**
+
+## Citation
+
+If you use this code in your research, please cite:
+
+```bibtex
+@inproceedings{wang2026efficient,
+  title={On Efficient Approximate Aggregate Nearest Neighbor Queries over Learned Representations},
+  author={Wang, Carrie and Amer-Yahia, Sihem and Lakshmanan, Laks and Cheng, Reynold},
+  booktitle={ACM SIGMOD 2026},
+  year={2026}
+}
+```
