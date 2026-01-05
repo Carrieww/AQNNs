@@ -24,12 +24,10 @@ If you use this code in your research, please cite:
 
 - [Problem Statement](#problem-statement)
 - [Algorithms](#algorithms)
+- [Datasets](#datasets)
 - [Installation](#installation)
 - [Quick Start](#quick-start)
-- [Usage](#usage)
 - [Configuration](#configuration)
-- [Results](#results)
-- [Repository Structure](#repository-structure)
 - [License](#license)
 
 ## 🎯 Problem Statement
@@ -139,11 +137,7 @@ python main.py --help
 
 ### Output
 
-Results are saved in the `results/` directory, organized by algorithm:
-- `results/SPRinT-C/`
-- `results/SPRinT-V/`
-- `results/PQA-PT/`
-- etc.
+Results are saved in the `results/` directory, organized by algorithm, such as `results/SPRinT-C/`.
 
 Each result file contains detailed metrics including:
 - Execution time
@@ -154,24 +148,12 @@ Each result file contains detailed metrics including:
 
 Detailed results and analysis can be found in the paper.
 
-## 📝 Notes
-
-- The code uses random seeds for reproducibility. Set `seed=2024` for scalability experiments.
-- Results are automatically saved to the `results/` directory.
-- For large datasets, consider adjusting `--s` and `--s_p` parameters based on available memory.
-
-## 🤝 Contributing
-
-This repository contains the official implementation for the SIGMOD 2026 paper. For questions or issues, please refer to the paper or contact the authors.
-
 ## 📄 License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+This project is licensed under the MIT License.
 
 ## 🙏 Acknowledgments
 
 We thank the authors of the baseline methods (PQA, SUPG) and the providers of the datasets used in our experiments.
 
----
-
-**For questions or issues, please refer to the paper or open an issue in this repository.**
+**For questions or issues, please refer to the paper or contact the authors.**
