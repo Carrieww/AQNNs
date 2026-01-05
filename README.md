@@ -39,7 +39,7 @@ This repository implements several algorithms for solving Aggregation Queries ov
 
 ## 📊 Datasets
 
-The experiments use the following real-world datasets:
+The experiments use the following five real-world datasets:
 
 ### Medical Datasets
 - **eICU**: Electronic Intensive Care Unit dataset
