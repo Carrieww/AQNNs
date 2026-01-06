@@ -13,7 +13,7 @@ title: AQNNs
 <div style="text-align: center;">
   <h1>On Efficient Approximate Aggregate Nearest Neighbor Queries over Learned Representations</h1>
   <p><strong>Carrie Wang, Sihem Amer-Yahia, Laks Lakshmanan, Reynold Cheng</strong></p>
-  <p><strong><a href="#">[Paper]</a></strong> &nbsp;&nbsp; <strong><a href="https://github.com/Carrieww/AQNNs">[Code]</a></strong></p>
+  <p><strong><a href="https://arxiv.org/pdf/2502.18803">[Paper]</a></strong> &nbsp;&nbsp; <strong><a href="https://github.com/Carrieww/AQNNs">[Code]</a></strong></p>
 </div>
 
 <p align="center">

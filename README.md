@@ -6,6 +6,8 @@
 This repository contains the implementation and experimental data for the paper **On Efficient Approximate Aggregate Nearest Neighbor
 Queries over Learned Representations**, accepted to **SIGMOD 2026**.
 
+📄 **Paper**: [Link to paper](https://arxiv.org/pdf/2502.18803)
+
 
 ## 📋 Table of Contents
 
